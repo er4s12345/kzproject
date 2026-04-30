@@ -383,6 +383,46 @@
       ]
     },
     {
+      "__guid": "3131719b-78b1-4bb6-8819-1e4579a89fd3",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "Deathrun Network Manager",
+      "Position": "0,0,0",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "DeathrunNetworkManager",
+          "__guid": "f9666d67-6f67-4d43-a014-12a5dced3b0d",
+          "__enabled": true,
+          "Flags": 0,
+          "StartServer": true,
+          "PlayerTemplate": {
+            "_type": "gameobject",
+            "go": "785d4079-9eb7-440f-8686-093d77d493ad"
+          },
+          "AutoFindPlayerTemplate": true,
+          "DisableTemplateOnStart": true,
+          "SpawnPoints": [],
+          "FallbackSpawnOffset": "0,0,80",
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null
+        }
+      ],
+      "Children": []
+    },
+    {
       "__guid": "a5c7f7ce-1252-4f2f-b51a-0928599ac96c",
       "__version": 2,
       "Flags": 0,
@@ -441,13 +481,18 @@
       "CustomBounds": false
     },
     "GameObjectSystems": {
+      "Sandbox.MovieMaker.MovieRecorderSystem": {
+        "DisableClientRecording": false
+      },
+      "Sandbox.Clutter.ClutterGridSystem": {
+        "Storage": {
+          "$blob": "cc175f13-572f-454f-8db2-fff873a86be2"
+        }
+      },
       "Sandbox.SelectionSetsSystem": {
         "Data": {
           "SelectionSets": []
         }
-      },
-      "Sandbox.MovieMaker.MovieRecorderSystem": {
-        "DisableClientRecording": false
       }
     }
   },
