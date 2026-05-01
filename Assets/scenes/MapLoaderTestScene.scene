@@ -503,6 +503,39 @@
         }
       ],
       "Children": []
+    },
+    {
+      "__guid": "294ba047-a5ef-475f-8a65-59eaa7270540",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "SpawnPoint_02",
+      "Position": "424.482635,-221.110443,61.6161652",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "DeathrunSpawnPoint",
+          "__guid": "6eb074d2-35e8-4abc-be81-eb83969de66a",
+          "__enabled": true,
+          "Flags": 0,
+          "EnabledForSpawning": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "Priority": 0
+        }
+      ],
+      "Children": []
     }
   ],
   "SceneProperties": {
@@ -525,9 +558,6 @@
       "CustomBounds": false
     },
     "GameObjectSystems": {
-      "Sandbox.MovieMaker.MovieRecorderSystem": {
-        "DisableClientRecording": false
-      },
       "Sandbox.SelectionSetsSystem": {
         "Data": {
           "SelectionSets": []
@@ -537,6 +567,9 @@
         "Storage": {
           "$blob": "cc175f13-572f-454f-8db2-fff873a86be2"
         }
+      },
+      "Sandbox.MovieMaker.MovieRecorderSystem": {
+        "DisableClientRecording": false
       }
     }
   },
