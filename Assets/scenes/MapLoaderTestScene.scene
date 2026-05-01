@@ -416,7 +416,6 @@
             "_type": "gameobject",
             "go": "785d4079-9eb7-440f-8686-093d77d493ad"
           },
-          "SpawnPoints": [],
           "StartServer": true
         }
       ],
@@ -521,6 +520,33 @@
           },
           "TeleportPhysics": true,
           "TeleportPlayers": true
+        },
+        {
+          "__type": "Sandbox.ModelRenderer",
+          "__guid": "33b3b453-4b94-4239-a000-19f35890f580",
+          "__enabled": true,
+          "Flags": 0,
+          "BodyGroups": 18446744073709551615,
+          "CreateAttachments": false,
+          "LodOverride": null,
+          "MaterialGroup": null,
+          "MaterialOverride": null,
+          "Materials": null,
+          "Model": null,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "RenderOptions": {
+            "GameLayer": true,
+            "OverlayLayer": false,
+            "BloomLayer": false,
+            "AfterUILayer": false
+          },
+          "RenderType": "On",
+          "Tint": "1,1,1,1"
         }
       ],
       "Children": []
@@ -687,6 +713,72 @@
         }
       ],
       "Children": []
+    },
+    {
+      "__guid": "d43624ee-df5e-4c98-ac8c-bfe276026940",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "SpawnPoint_0",
+      "Position": "335.02655,-106.592621,76.0606918",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "DeathrunSpawnPoint",
+          "__guid": "ec4d4baf-ca8a-4f54-9ad7-d97699765571",
+          "__enabled": true,
+          "Flags": 0,
+          "EnabledForSpawning": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "Priority": 0
+        }
+      ],
+      "Children": []
+    },
+    {
+      "__guid": "5ebca1a9-686d-49df-8284-825dbcb919b1",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "SpawnPoint_1",
+      "Position": "724.126343,-237.110962,84.9582825",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "DeathrunSpawnPoint",
+          "__guid": "cd16b721-670d-40f5-aa13-cc6788fa53f4",
+          "__enabled": true,
+          "Flags": 0,
+          "EnabledForSpawning": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "Priority": 4
+        }
+      ],
+      "Children": []
     }
   ],
   "SceneProperties": {
@@ -709,18 +801,18 @@
       "CustomBounds": false
     },
     "GameObjectSystems": {
-      "Sandbox.MovieMaker.MovieRecorderSystem": {
-        "DisableClientRecording": false
+      "Sandbox.SelectionSetsSystem": {
+        "Data": {
+          "SelectionSets": []
+        }
       },
       "Sandbox.Clutter.ClutterGridSystem": {
         "Storage": {
           "$blob": "cc175f13-572f-454f-8db2-fff873a86be2"
         }
       },
-      "Sandbox.SelectionSetsSystem": {
-        "Data": {
-          "SelectionSets": []
-        }
+      "Sandbox.MovieMaker.MovieRecorderSystem": {
+        "DisableClientRecording": false
       }
     }
   },
