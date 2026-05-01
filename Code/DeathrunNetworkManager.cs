@@ -126,6 +126,13 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		var spawnSucceeded = playerObject.NetworkSpawn( connection );
 		deathrunPlayer.Initialize( connection );
 
+		var health = playerObject.Components.Get<DeathrunHealth>();
+
+		if ( health.IsValid() )
+			health.ResetHealth();
+		else
+			Log.Warning( $"Spawned player '{playerObject.Name}' has no DeathrunHealth component. Damage sources will ignore it." );
+
 		Log.Info( $"NetworkSpawn result for '{playerObject.Name}': success={spawnSucceeded}, networkActive={playerObject.Network.Active}, owner={DescribeConnection( playerObject.Network.Owner )}, position={playerObject.WorldPosition}, networkMode={playerObject.NetworkMode}." );
 
 		if ( !spawnSucceeded || !playerObject.Network.Active )
