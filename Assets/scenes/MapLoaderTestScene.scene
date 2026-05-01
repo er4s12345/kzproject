@@ -241,6 +241,18 @@
           "RemoveUnownedItems": true,
           "Source": "OwnerConnection",
           "WorkshopItems": []
+        },
+        {
+          "__type": "DeathrunPlayer",
+          "__guid": "86d6e077-10d2-40a0-a532-2575edc7ecbb",
+          "__enabled": true,
+          "Flags": 0,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null
         }
       ],
       "Children": [
@@ -403,21 +415,20 @@
           "__guid": "f9666d67-6f67-4d43-a014-12a5dced3b0d",
           "__enabled": true,
           "Flags": 0,
-          "StartServer": true,
-          "PlayerTemplate": {
-            "_type": "gameobject",
-            "go": "785d4079-9eb7-440f-8686-093d77d493ad"
-          },
-          "AutoFindPlayerTemplate": true,
+          "AutoFindPlayerTemplate": false,
           "DisableTemplateOnStart": true,
-          "SpawnPoints": [],
           "FallbackSpawnOffset": "0,0,80",
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
           "OnComponentEnabled": null,
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
-          "OnComponentUpdate": null
+          "OnComponentUpdate": null,
+          "PlayerTemplate": {
+            "_type": "gameobject",
+            "go": "785d4079-9eb7-440f-8686-093d77d493ad"
+          },
+          "StartServer": true
         }
       ],
       "Children": []
@@ -459,6 +470,39 @@
         }
       ],
       "Children": []
+    },
+    {
+      "__guid": "6ca5bf10-41ed-438b-8359-7d7541037131",
+      "__version": 2,
+      "Flags": 0,
+      "Name": "SpawnPoint_01",
+      "Position": "221.588333,-115.612869,66.1928177",
+      "Rotation": "0,0,0,1",
+      "Scale": "1,1,1",
+      "Tags": "",
+      "Enabled": true,
+      "NetworkMode": 2,
+      "NetworkFlags": 0,
+      "NetworkOrphaned": 0,
+      "NetworkTransmit": true,
+      "OwnerTransfer": 1,
+      "Components": [
+        {
+          "__type": "DeathrunSpawnPoint",
+          "__guid": "5dc066f6-0c2f-462f-84c6-21a0ac23cfa6",
+          "__enabled": true,
+          "Flags": 0,
+          "EnabledForSpawning": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "Priority": 0
+        }
+      ],
+      "Children": []
     }
   ],
   "SceneProperties": {
@@ -484,14 +528,14 @@
       "Sandbox.MovieMaker.MovieRecorderSystem": {
         "DisableClientRecording": false
       },
-      "Sandbox.Clutter.ClutterGridSystem": {
-        "Storage": {
-          "$blob": "cc175f13-572f-454f-8db2-fff873a86be2"
-        }
-      },
       "Sandbox.SelectionSetsSystem": {
         "Data": {
           "SelectionSets": []
+        }
+      },
+      "Sandbox.Clutter.ClutterGridSystem": {
+        "Storage": {
+          "$blob": "cc175f13-572f-454f-8db2-fff873a86be2"
         }
       }
     }
