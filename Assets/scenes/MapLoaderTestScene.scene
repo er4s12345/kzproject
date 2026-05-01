@@ -43,8 +43,8 @@
           "RenderTexture": null,
           "TargetEye": "None",
           "Viewport": "0,0,1,1",
-          "ZFar": 10000,
-          "ZNear": 10
+          "ZFar": 100000,
+          "ZNear": 1
         }
       ],
       "Children": []
@@ -127,7 +127,7 @@
           "RunSpeed": 320,
           "ShowColliderComponents": false,
           "ShowRigidbodyComponent": false,
-          "ThirdPerson": true,
+          "ThirdPerson": false,
           "ToggleCameraModeButton": "view",
           "UseAnimatorControls": true,
           "UseButton": "use",
@@ -464,7 +464,7 @@
       "__version": 2,
       "Flags": 0,
       "Name": "TriggerTeleport To Spawn",
-      "Position": "503.148621,110.89917,-296.246246",
+      "Position": "503.148621,181.711792,-296.246246",
       "Rotation": "0,0,0,1",
       "Scale": "1,1,1",
       "Tags": "",
@@ -503,7 +503,7 @@
         },
         {
           "__type": "Sandbox.Components.Triggers.TriggerTeleport",
-          "__guid": "a2a80f3b-1e0e-4f48-a65c-5068546c0689",
+          "__guid": "83ede902-a5ed-4ff1-9f08-013471ce55f9",
           "__enabled": true,
           "Flags": 0,
           "OnComponentDestroy": null,
@@ -512,7 +512,9 @@
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
           "OnComponentUpdate": null,
-          "ResetVelocity": true,
+          "OnlyOnce": false,
+          "ResetVelocity": false,
+          "RetriggerDelay": 0.5,
           "TagFilter": "",
           "TeleportDestination": {
             "_type": "gameobject",
@@ -520,33 +522,6 @@
           },
           "TeleportPhysics": true,
           "TeleportPlayers": true
-        },
-        {
-          "__type": "Sandbox.ModelRenderer",
-          "__guid": "33b3b453-4b94-4239-a000-19f35890f580",
-          "__enabled": true,
-          "Flags": 0,
-          "BodyGroups": 18446744073709551615,
-          "CreateAttachments": false,
-          "LodOverride": null,
-          "MaterialGroup": null,
-          "MaterialOverride": null,
-          "Materials": null,
-          "Model": null,
-          "OnComponentDestroy": null,
-          "OnComponentDisabled": null,
-          "OnComponentEnabled": null,
-          "OnComponentFixedUpdate": null,
-          "OnComponentStart": null,
-          "OnComponentUpdate": null,
-          "RenderOptions": {
-            "GameLayer": true,
-            "OverlayLayer": false,
-            "BloomLayer": false,
-            "AfterUILayer": false
-          },
-          "RenderType": "On",
-          "Tint": "1,1,1,1"
         }
       ],
       "Children": []
@@ -556,7 +531,7 @@
       "__version": 2,
       "Flags": 0,
       "Name": "Phys Cube",
-      "Position": "147.327469,-444.21756,173.797226",
+      "Position": "147.327469,-784.645569,124.291481",
       "Rotation": "0,0,0,1",
       "Scale": "1,1,1",
       "Tags": "",
@@ -806,13 +781,13 @@
           "SelectionSets": []
         }
       },
+      "Sandbox.MovieMaker.MovieRecorderSystem": {
+        "DisableClientRecording": false
+      },
       "Sandbox.Clutter.ClutterGridSystem": {
         "Storage": {
           "$blob": "cc175f13-572f-454f-8db2-fff873a86be2"
         }
-      },
-      "Sandbox.MovieMaker.MovieRecorderSystem": {
-        "DisableClientRecording": false
       }
     }
   },

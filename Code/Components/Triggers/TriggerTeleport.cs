@@ -13,26 +13,8 @@ using System.Text;
 namespace Sandbox.Components.Triggers
 {
 	[Category( "Triggers" ), Icon( "adjust" )] // ? wtf is this icon, where can I found which can I use? Can I use custom icons?
-	public class TriggerTeleport : Component, Component.ITriggerListener
+	public class TriggerTeleport : TriggerBase, Component.ITriggerListener
 	{
-		[RequireComponent]
-		private BoxCollider TriggerCollider { get; set; }
-
-		[RequireComponent]
-		private ModelRenderer ModelRenderer { get; set; }
-
-		[Property]
-		bool TeleportPlayers { get; set; } = true;
-
-
-		[Property]
-		bool TeleportPhysics { get; set; } = true;
-
-		// If set at least one tag, it will be used to filter out which objects can be teleported. If empty, no filter will be applied.
-		[Property]
-		[Description( "If set at least one tag, it will be used to filter out which objects can be teleported. If empty, no filter will be applied. NOT IMPLEMENTED YET!" )]
-		TagSet TagFilter { get; set; } = new TagSet();
-
 		[Property]
 		[Description( "Zero-out object's velocity on teleport?" )]
 		bool ResetVelocity { get; set; } = false;
@@ -43,26 +25,25 @@ namespace Sandbox.Components.Triggers
 
 		private Vector3 _TeleportDestLocation = Vector3.Zero;
 
-
 		protected bool CanTeleport(GameObject Object)
 		{
+			if ( !CanTrigger() ) return false;
 			if ( Object == null ) return false;
 			
 			bool IsPlayer = Object.Components.Get<PlayerController>() != null;
 			bool IsPhysics = Object.Components.Get<Rigidbody>() != null;
+			bool TagFilterPassed = true;
 
-			if( TagFilter.Count() > 0)
-			{
-				// TODO: Add tag checking
-			}
+			if ( TagFilter.Any() )
+				TagFilterPassed = Object.Tags.HasAny( TagFilter );
+			
 
-			return (TeleportPlayers && IsPlayer) || ( TeleportPhysics && IsPhysics );
+			return TagFilterPassed && ((TeleportPlayers && IsPlayer) || ( TeleportPhysics && IsPhysics ));
 		}
 
 		protected override void OnAwake()
 		{
 			TriggerCollider ??= Components.GetOrCreate<BoxCollider>();
-			ModelRenderer ??= Components.GetOrCreate<ModelRenderer>();
 
 			if ( TriggerCollider is not null )
 				TriggerCollider.IsTrigger = true;
@@ -80,54 +61,13 @@ namespace Sandbox.Components.Triggers
 			Tags.Add( "trigger" );
 		}
 
-		protected override void OnStart()
-		{
-			if ( Game.IsPlaying )
-				ModelRenderer.Enabled = false;
-		}
-
 		protected override void DrawGizmos()
 		{
-			if ( !TriggerCollider.IsValid() )
+			if ( !TriggerCollider.IsValid() || !TeleportDestination.IsValid() )
 				return;
-
+			base.DrawGizmos();
 
 			var DestinationLocal = WorldTransform.PointToLocal( TeleportDestination.WorldPosition ); // NOTE: Gizmos are using local space for drawing, so we need to convert the world position to local position in this case
-
-			var TextPos = TriggerCollider.Center;
-			var DistanceToCamera = Gizmo.CameraTransform.Position.Distance( TextPos );
-			bool DrawText = DistanceToCamera < 1000.0f;
-
-			var halfSize = TriggerCollider.Scale * 0.5f;
-			var box = new BBox(
-				TriggerCollider.Center - halfSize,
-				TriggerCollider.Center + halfSize
-			);
-
-
-			Gizmo.Draw.IgnoreDepth = Gizmo.IsSelected;
-			Gizmo.Hitbox.DepthBias = 0.01f;
-			Gizmo.Hitbox.BBox( box );
-
-			if ( Gizmo.HasClicked && Gizmo.Pressed.This )
-			{
-				Gizmo.Select();
-			}
-
-			var color = Gizmo.IsHovered ? Color.Yellow : Color.Orange;
-
-			Gizmo.Draw.Color = color.WithAlpha( 0.25f );
-			Gizmo.Draw.SolidBox( box );
-
-			Gizmo.Draw.Color = color;
-			Gizmo.Draw.LineBBox( box );
-
-			if ( DrawText )
-			{
-				Gizmo.Draw.IgnoreDepth = false;
-				Gizmo.Draw.Color = Color.Green;
-				Gizmo.Draw.Text( "Trigger Teleport", new Transform( TextPos ) );
-			}
 			if ( TeleportDestination is not null && Gizmo.IsSelected )
 			{
 
@@ -159,6 +99,9 @@ namespace Sandbox.Components.Triggers
 				}
 
 				other.WorldPosition = _TeleportDestLocation;
+				LastTriggerTime = Time.Now;
+
+				if ( OnlyOnce ) DestroyGameObject();
 			}
 		}
 
