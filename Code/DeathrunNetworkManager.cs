@@ -7,9 +7,8 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 {
 	[Property] public bool StartServer { get; set; } = true;
 	[Property] public GameObject PlayerTemplate { get; set; }
-	[Property] public bool AutoFindPlayerTemplate { get; set; } = true;
+	[Property] public bool AutoFindPlayerTemplate { get; set; } = false;
 	[Property] public bool DisableTemplateOnStart { get; set; } = true;
-	[Property] public List<GameObject> SpawnPoints { get; set; } = new();
 	[Property] public Vector3 FallbackSpawnOffset { get; set; } = new( 0.0f, 0.0f, 80.0f );
 
 	private bool _templateDisabled;
@@ -20,7 +19,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		if ( Scene.IsEditor )
 			return;
 
-		Log.Info( $"DeathrunNetworkManager loading. Networking active: {Networking.IsActive}. StartServer: {StartServer}." );
+		Log.Info( $"DeathrunNetworkManager loading. Networking active: {Networking.IsActive}. IsHost: {Networking.IsHost}. StartServer: {StartServer}." );
 
 		if ( StartServer && !Networking.IsActive )
 		{
@@ -38,165 +37,218 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 		if ( !PlayerTemplate.IsValid() )
 		{
-			Log.Warning( "DeathrunNetworkManager has no PlayerTemplate. Assign your Player Controller prefab/template in the Inspector." );
+			Log.Warning( "DeathrunNetworkManager has no PlayerTemplate. Assign PlayerTemplate manually in the Inspector." );
 			return;
 		}
 
-		Log.Info( $"DeathrunNetworkManager using player template '{PlayerTemplate.Name}' at {PlayerTemplate.WorldPosition}." );
+		Log.Info( $"DeathrunNetworkManager resolved PlayerTemplate '{PlayerTemplate.Name}' at {PlayerTemplate.WorldPosition}." );
 
 		if ( DisableTemplateOnStart )
-		{
-			if ( PlayerTemplate == GameObject )
-			{
-				Log.Warning( "DeathrunNetworkManager is on the same GameObject as PlayerTemplate, so it will not disable the template. Put this component on a separate empty GameObject." );
-				return;
-			}
-
-			PlayerTemplate.Enabled = false;
-			_templateDisabled = true;
-			Log.Info( $"DeathrunNetworkManager disabled scene template '{PlayerTemplate.Name}'. Networked player clones will be spawned per connection." );
-		}
+			DisableSceneTemplate();
 	}
 
 	public void OnConnected( Connection connection )
 	{
-		Log.Info( $"Client connected: {DescribeConnection( connection )}." );
+		Log.Info( $"DeathrunNetworkManager connection connected: {DescribeConnection( connection )}." );
 	}
 
 	public void OnActive( Connection connection )
 	{
-		Log.Info( $"Client active: {DescribeConnection( connection )}. Preparing player spawn." );
+		Log.Info( $"DeathrunNetworkManager connection active: {DescribeConnection( connection )}. IsHost={Networking.IsHost}." );
+
+		if ( !Networking.IsHost )
+		{
+			Log.Info( $"DeathrunNetworkManager is running as a client, so it will not spawn a player for {DescribeConnection( connection )}." );
+			return;
+		}
+
+		SpawnPlayerForConnection( connection );
+	}
+
+	public void OnDisconnected( Connection connection )
+	{
+		Log.Info( $"DeathrunNetworkManager connection disconnected: {DescribeConnection( connection )}." );
+
+		if ( !Networking.IsHost )
+			return;
+
+		var removed = 0;
+
+		foreach ( var player in Scene.GetAllComponents<DeathrunPlayer>().ToArray() )
+		{
+			if ( !player.IsValid() || player.GameObject == PlayerTemplate )
+				continue;
+
+			if ( !player.IsOwnedBy( connection ) )
+				continue;
+
+			Log.Info( $"Destroying DeathrunPlayer '{player.GameObject.Name}' owned by {DescribeConnection( connection )}." );
+			player.GameObject.Destroy();
+			removed++;
+		}
+
+		Log.Info( $"DeathrunNetworkManager disconnect cleanup removed {removed} player object(s) for {DescribeConnection( connection )}." );
+	}
+
+	private void SpawnPlayerForConnection( Connection connection )
+	{
+		if ( connection is null )
+		{
+			Log.Warning( "DeathrunNetworkManager cannot spawn a player for a null connection." );
+			return;
+		}
 
 		if ( !PlayerTemplate.IsValid() && !ResolvePlayerTemplate() )
 		{
-			Log.Warning( $"Cannot spawn player for {DescribeConnection( connection )}: no PlayerTemplate assigned or found." );
+			Log.Warning( $"Cannot spawn player for {DescribeConnection( connection )}: PlayerTemplate is missing." );
 			return;
 		}
 
 		if ( HasPlayerForConnection( connection ) )
 		{
-			Log.Warning( $"Skipping duplicate player spawn for {DescribeConnection( connection )}; a networked PlayerController already exists for this owner." );
+			Log.Warning( $"Prevented duplicate player spawn for {DescribeConnection( connection )}; an existing DeathrunPlayer already has this owner." );
 			return;
 		}
 
-		var spawnTransform = FindSpawnTransform( _spawnIndex++ );
-		var player = PlayerTemplate.Clone( spawnTransform, name: $"Player - {connection.DisplayName}" );
-		player.Enabled = true;
-		player.NetworkMode = NetworkMode.Object;
+		var spawnTransform = GetNextSpawnTransform();
+		var playerObject = PlayerTemplate.Clone( spawnTransform, name: $"Player - {connection.DisplayName}" );
 
-		var spawnSucceeded = player.NetworkSpawn( connection );
-		Log.Info( $"Spawned '{player.Name}' for {DescribeConnection( connection )}. NetworkSpawn success: {spawnSucceeded}. Network active: {player.Network.Active}. Owner: {DescribeConnection( player.Network.Owner )}. Position: {player.WorldPosition}. NetworkMode: {player.NetworkMode}." );
-
-		LogPlayerSetup( player );
-
-		if ( !spawnSucceeded || !player.Network.Active )
+		if ( !playerObject.IsValid() )
 		{
-			Log.Warning( $"Player '{player.Name}' did not become an active network object. Check that spawning is happening on the host and that the object is not set to NetworkMode.Never." );
+			Log.Warning( $"Failed to clone PlayerTemplate for {DescribeConnection( connection )}." );
+			return;
 		}
-	}
 
-	public void OnDisconnected( Connection connection )
-	{
-		Log.Info( $"Client disconnected: {DescribeConnection( connection )}." );
+		playerObject.Enabled = true;
+		playerObject.NetworkMode = NetworkMode.Object;
 
-		foreach ( var controller in Scene.GetAllComponents<PlayerController>().ToArray() )
+		var deathrunPlayer = playerObject.Components.GetOrCreate<DeathrunPlayer>();
+		var spawnSucceeded = playerObject.NetworkSpawn( connection );
+		deathrunPlayer.Initialize( connection );
+
+		Log.Info( $"NetworkSpawn result for '{playerObject.Name}': success={spawnSucceeded}, networkActive={playerObject.Network.Active}, owner={DescribeConnection( playerObject.Network.Owner )}, position={playerObject.WorldPosition}, networkMode={playerObject.NetworkMode}." );
+
+		if ( !spawnSucceeded || !playerObject.Network.Active )
 		{
-			var player = controller.GameObject;
-
-			if ( player == PlayerTemplate )
-				continue;
-
-			if ( player.Network.Owner != connection )
-				continue;
-
-			Log.Info( $"Destroying player '{player.Name}' for disconnected client {DescribeConnection( connection )}." );
-			player.Destroy();
+			Log.Warning( $"Player '{playerObject.Name}' did not become an active network object. Make sure spawning is host-side and the template/root NetworkMode is not Never." );
 		}
 	}
 
 	private bool ResolvePlayerTemplate()
 	{
 		if ( PlayerTemplate.IsValid() )
+		{
+			Log.Info( $"DeathrunNetworkManager using assigned PlayerTemplate '{PlayerTemplate.Name}'." );
+			EnsureTemplateHasDeathrunPlayer();
 			return true;
+		}
 
 		if ( !AutoFindPlayerTemplate )
 			return false;
 
-		var controllers = Scene.GetAllComponents<PlayerController>()
-			.Where( x => x.GameObject != GameObject )
+		var templates = Scene.GetAllComponents<DeathrunPlayer>()
+			.Where( x => x.IsValid() && x.GameObject != GameObject )
+			.Select( x => x.GameObject )
+			.Distinct()
 			.ToArray();
 
-		if ( controllers.Length == 0 )
-			return false;
-
-		if ( controllers.Length > 1 )
+		if ( templates.Length == 0 )
 		{
-			Log.Warning( $"DeathrunNetworkManager found {controllers.Length} PlayerControllers in the scene. Assign PlayerTemplate manually so it does not pick the wrong one." );
+			Log.Warning( "AutoFindPlayerTemplate is enabled, but no GameObject with DeathrunPlayer was found." );
+			return false;
 		}
 
-		PlayerTemplate = controllers[0].GameObject;
-		return PlayerTemplate.IsValid();
+		if ( templates.Length > 1 )
+		{
+			Log.Warning( $"AutoFindPlayerTemplate found {templates.Length} possible DeathrunPlayer templates. Assign PlayerTemplate manually in the Inspector; using '{templates[0].Name}' for now." );
+		}
+
+		PlayerTemplate = templates[0];
+		Log.Info( $"AutoFindPlayerTemplate selected '{PlayerTemplate.Name}'." );
+		return true;
+	}
+
+	private void EnsureTemplateHasDeathrunPlayer()
+	{
+		if ( !PlayerTemplate.IsValid() )
+			return;
+
+		if ( PlayerTemplate.Components.Get<DeathrunPlayer>().IsValid() )
+			return;
+
+		PlayerTemplate.Components.Create<DeathrunPlayer>();
+		Log.Warning( $"PlayerTemplate '{PlayerTemplate.Name}' did not have DeathrunPlayer, so one was added. Add it in the scene/prefab for clearer setup." );
+	}
+
+	private void DisableSceneTemplate()
+	{
+		if ( !PlayerTemplate.IsValid() )
+			return;
+
+		if ( PlayerTemplate == GameObject )
+		{
+			Log.Warning( "DeathrunNetworkManager will not disable PlayerTemplate because it is on the same GameObject as the manager. Put the manager on a separate NetworkManager object." );
+			return;
+		}
+
+		PlayerTemplate.Enabled = false;
+		_templateDisabled = true;
+		Log.Info( $"DeathrunNetworkManager disabled scene PlayerTemplate '{PlayerTemplate.Name}'. Runtime clones will be spawned per connection." );
 	}
 
 	private bool HasPlayerForConnection( Connection connection )
 	{
-		foreach ( var controller in Scene.GetAllComponents<PlayerController>() )
+		foreach ( var player in Scene.GetAllComponents<DeathrunPlayer>() )
 		{
-			var player = controller.GameObject;
-
-			if ( player == PlayerTemplate )
+			if ( !player.IsValid() || player.GameObject == PlayerTemplate )
 				continue;
 
-			if ( player.Network.Active && player.Network.Owner == connection )
+			if ( player.IsOwnedBy( connection ) )
 				return true;
 		}
 
 		return false;
 	}
 
-	private Transform FindSpawnTransform( int spawnIndex )
+	private Transform GetNextSpawnTransform()
 	{
-		var spawnPoints = SpawnPoints?.Where( x => x.IsValid() ).ToArray();
+		var spawnPoints = GetSpawnPoints();
 
-		if ( spawnPoints is { Length: > 0 } )
-			return spawnPoints[spawnIndex % spawnPoints.Length].WorldTransform.WithScale( 1.0f );
+		if ( spawnPoints.Length > 0 )
+		{
+			var spawnPoint = spawnPoints[_spawnIndex++ % spawnPoints.Length];
+			Log.Info( $"Selected spawn point '{spawnPoint.GameObject.Name}' with priority {spawnPoint.Priority} at {spawnPoint.WorldPosition}." );
+			return spawnPoint.WorldTransform.WithScale( 1.0f );
+		}
 
-		if ( _templateDisabled && PlayerTemplate.IsValid() )
+		var fallback = GetFallbackSpawnTransform( _spawnIndex++ );
+		Log.Warning( $"No enabled DeathrunSpawnPoint found. Using fallback spawn at {fallback.Position}." );
+		return fallback;
+	}
+
+	private DeathrunSpawnPoint[] GetSpawnPoints()
+	{
+		return Scene.GetAllComponents<DeathrunSpawnPoint>()
+			.Where( x => x.IsValid() && x.IsValidSpawnPoint )
+			.OrderBy( x => x.Priority )
+			.ThenBy( x => x.GameObject.Name )
+			.ToArray();
+	}
+
+	private Transform GetFallbackSpawnTransform( int spawnIndex )
+	{
+		var offset = FallbackSpawnOffset + new Vector3( spawnIndex * 64.0f, 0.0f, 0.0f );
+
+		if ( PlayerTemplate.IsValid() )
 		{
 			var templateTransform = PlayerTemplate.WorldTransform.WithScale( 1.0f );
-			return templateTransform.WithPosition( templateTransform.Position + new Vector3( spawnIndex * 64.0f, 0.0f, 0.0f ) );
+			return templateTransform.WithPosition( templateTransform.Position + offset );
 		}
 
 		return WorldTransform
-			.WithPosition( WorldPosition + FallbackSpawnOffset + new Vector3( spawnIndex * 64.0f, 0.0f, 0.0f ) )
+			.WithPosition( WorldPosition + offset )
 			.WithRotation( WorldRotation )
 			.WithScale( 1.0f );
-	}
-
-	private void LogPlayerSetup( GameObject player )
-	{
-		var controller = player.GetComponent<PlayerController>();
-		var renderers = player.GetComponentsInChildren<SkinnedModelRenderer>( true, true ).ToArray();
-
-		if ( controller is null )
-		{
-			Log.Warning( $"Spawned player '{player.Name}' has no PlayerController on the root GameObject." );
-		}
-		else
-		{
-			Log.Info( $"PlayerController for '{player.Name}': UseInputControls={controller.UseInputControls}, UseLookControls={controller.UseLookControls}, HideBodyInFirstPerson={controller.HideBodyInFirstPerson}, WalkSpeed={controller.WalkSpeed}, RunSpeed={controller.RunSpeed}, JumpSpeed={controller.JumpSpeed}." );
-		}
-
-		if ( renderers.Length == 0 )
-		{
-			Log.Warning( $"Spawned player '{player.Name}' has no SkinnedModelRenderer in its children, so remote clients will not have a visible body." );
-			return;
-		}
-
-		foreach ( var renderer in renderers )
-		{
-			Log.Info( $"Renderer for '{player.Name}': GameObject='{renderer.GameObject.Name}', Enabled={renderer.Enabled}, Active={renderer.Active}, RenderType={renderer.RenderType}, Model={renderer.Model}." );
-		}
 	}
 
 	private static string DescribeConnection( Connection connection )
