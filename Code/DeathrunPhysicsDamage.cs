@@ -13,7 +13,7 @@ public sealed class DeathrunPhysicsDamage : Component, Component.ICollisionListe
 	[Property] public float MaxDamage { get; set; } = 100.0f;
 	[Property] public float Cooldown { get; set; } = 0.25f;
 	[Property] public bool IgnoreSelfOwnedObjects { get; set; } = true;
-	[Property] public bool LogPhysicsDamage { get; set; } = true;
+	[Property] public bool LogPhysicsDamage { get; set; } = false;
 
 	private float _nextDamageTime;
 

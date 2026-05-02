@@ -3,6 +3,8 @@
 [Icon( "person" )]
 public sealed class DeathrunPlayer : Component
 {
+	[Property] public bool LogPlayerLifecycle { get; set; } = false;
+
 	private Connection _owner;
 
 	/// <summary>
@@ -25,7 +27,8 @@ public sealed class DeathrunPlayer : Component
 			return;
 		}
 
-		Log.Info( $"DeathrunPlayer '{GameObject.Name}' initialized for {OwnerName} ({OwnerId})." );
+		if ( LogPlayerLifecycle )
+			Log.Info( $"DeathrunPlayer '{GameObject.Name}' initialized for {OwnerName} ({OwnerId})." );
 	}
 
 	public bool IsOwnedBy( Connection connection )

@@ -10,6 +10,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 	[Property] public bool AutoFindPlayerTemplate { get; set; } = false;
 	[Property] public bool DisableTemplateOnStart { get; set; } = true;
 	[Property] public Vector3 FallbackSpawnOffset { get; set; } = new( 0.0f, 0.0f, 80.0f );
+	[Property] public bool LogNetworking { get; set; } = false;
 
 	private bool _templateDisabled;
 	private int _spawnIndex;
@@ -19,14 +20,14 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		if ( Scene.IsEditor )
 			return;
 
-		Log.Info( $"DeathrunNetworkManager loading. Networking active: {Networking.IsActive}. IsHost: {Networking.IsHost}. StartServer: {StartServer}." );
+		LogDebug( $"DeathrunNetworkManager loading. Networking active: {Networking.IsActive}. IsHost: {Networking.IsHost}. StartServer: {StartServer}." );
 
 		if ( StartServer && !Networking.IsActive )
 		{
 			LoadingScreen.Title = "Creating Lobby";
-			Log.Info( "DeathrunNetworkManager creating multiplayer lobby." );
+			LogDebug( "DeathrunNetworkManager creating multiplayer lobby." );
 
-			await Task.DelayRealtimeSeconds( 0.1f );
+			await GameTask.DelayRealtimeSeconds( 0.1f );
 			Networking.CreateLobby( new() );
 		}
 	}
@@ -41,7 +42,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 			return;
 		}
 
-		Log.Info( $"DeathrunNetworkManager resolved PlayerTemplate '{PlayerTemplate.Name}' at {PlayerTemplate.WorldPosition}." );
+		LogDebug( $"DeathrunNetworkManager resolved PlayerTemplate '{PlayerTemplate.Name}' at {PlayerTemplate.WorldPosition}." );
 
 		if ( DisableTemplateOnStart )
 			DisableSceneTemplate();
@@ -49,16 +50,16 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 	public void OnConnected( Connection connection )
 	{
-		Log.Info( $"DeathrunNetworkManager connection connected: {DescribeConnection( connection )}." );
+		LogDebug( $"DeathrunNetworkManager connection connected: {DescribeConnection( connection )}." );
 	}
 
 	public void OnActive( Connection connection )
 	{
-		Log.Info( $"DeathrunNetworkManager connection active: {DescribeConnection( connection )}. IsHost={Networking.IsHost}." );
+		LogDebug( $"DeathrunNetworkManager connection active: {DescribeConnection( connection )}. IsHost={Networking.IsHost}." );
 
 		if ( !Networking.IsHost )
 		{
-			Log.Info( $"DeathrunNetworkManager is running as a client, so it will not spawn a player for {DescribeConnection( connection )}." );
+			LogDebug( $"DeathrunNetworkManager is running as a client, so it will not spawn a player for {DescribeConnection( connection )}." );
 			return;
 		}
 
@@ -67,7 +68,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 	public void OnDisconnected( Connection connection )
 	{
-		Log.Info( $"DeathrunNetworkManager connection disconnected: {DescribeConnection( connection )}." );
+		LogDebug( $"DeathrunNetworkManager connection disconnected: {DescribeConnection( connection )}." );
 
 		if ( !Networking.IsHost )
 			return;
@@ -82,12 +83,12 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 			if ( !player.IsOwnedBy( connection ) )
 				continue;
 
-			Log.Info( $"Destroying DeathrunPlayer '{player.GameObject.Name}' owned by {DescribeConnection( connection )}." );
+			LogDebug( $"Destroying DeathrunPlayer '{player.GameObject.Name}' owned by {DescribeConnection( connection )}." );
 			player.GameObject.Destroy();
 			removed++;
 		}
 
-		Log.Info( $"DeathrunNetworkManager disconnect cleanup removed {removed} player object(s) for {DescribeConnection( connection )}." );
+		LogDebug( $"DeathrunNetworkManager disconnect cleanup removed {removed} player object(s) for {DescribeConnection( connection )}." );
 	}
 
 	private void SpawnPlayerForConnection( Connection connection )
@@ -123,6 +124,8 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		playerObject.NetworkMode = NetworkMode.Object;
 
 		var deathrunPlayer = playerObject.Components.GetOrCreate<DeathrunPlayer>();
+		playerObject.Components.GetOrCreate<DeathrunOrbitDeathCamera>();
+
 		var spawnSucceeded = playerObject.NetworkSpawn( connection );
 		deathrunPlayer.Initialize( connection );
 
@@ -133,7 +136,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		else
 			Log.Warning( $"Spawned player '{playerObject.Name}' has no DeathrunHealth component. Damage sources will ignore it." );
 
-		Log.Info( $"NetworkSpawn result for '{playerObject.Name}': success={spawnSucceeded}, networkActive={playerObject.Network.Active}, owner={DescribeConnection( playerObject.Network.Owner )}, position={playerObject.WorldPosition}, networkMode={playerObject.NetworkMode}." );
+		LogDebug( $"NetworkSpawn result for '{playerObject.Name}': success={spawnSucceeded}, networkActive={playerObject.Network.Active}, owner={DescribeConnection( playerObject.Network.Owner )}, position={playerObject.WorldPosition}, networkMode={playerObject.NetworkMode}." );
 
 		if ( !spawnSucceeded || !playerObject.Network.Active )
 		{
@@ -141,11 +144,45 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		}
 	}
 
+	public bool TryMovePlayerToRespawn( DeathrunPlayer player )
+	{
+		if ( !Networking.IsHost )
+		{
+			Log.Warning( "DeathrunNetworkManager ignored a respawn move on a client. Respawning is host-authoritative." );
+			return false;
+		}
+
+		if ( !player.IsValid() || !player.GameObject.IsValid() )
+		{
+			Log.Warning( "DeathrunNetworkManager cannot respawn an invalid DeathrunPlayer." );
+			return false;
+		}
+
+		if ( player.GameObject == PlayerTemplate )
+		{
+			Log.Warning( "DeathrunNetworkManager will not respawn the scene PlayerTemplate. Runtime player clones only." );
+			return false;
+		}
+
+		var respawnTransform = GetNextSpawnTransform();
+		var playerObject = player.GameObject;
+
+		playerObject.Enabled = true;
+		playerObject.WorldTransform = respawnTransform;
+		ClearPlayerVelocity( playerObject );
+
+		if ( playerObject.Network.Active )
+			playerObject.Network.ClearInterpolation();
+
+		LogDebug( $"DeathrunNetworkManager moved '{playerObject.Name}' owned by {player.OwnerName} ({player.OwnerId}) to respawn position {playerObject.WorldPosition}." );
+		return true;
+	}
+
 	private bool ResolvePlayerTemplate()
 	{
 		if ( PlayerTemplate.IsValid() )
 		{
-			Log.Info( $"DeathrunNetworkManager using assigned PlayerTemplate '{PlayerTemplate.Name}'." );
+			LogDebug( $"DeathrunNetworkManager using assigned PlayerTemplate '{PlayerTemplate.Name}'." );
 			EnsureTemplateHasDeathrunPlayer();
 			return true;
 		}
@@ -171,7 +208,8 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		}
 
 		PlayerTemplate = templates[0];
-		Log.Info( $"AutoFindPlayerTemplate selected '{PlayerTemplate.Name}'." );
+		LogDebug( $"AutoFindPlayerTemplate selected '{PlayerTemplate.Name}'." );
+		EnsureTemplateHasDeathCamera();
 		return true;
 	}
 
@@ -181,10 +219,26 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 			return;
 
 		if ( PlayerTemplate.Components.Get<DeathrunPlayer>().IsValid() )
+		{
+			EnsureTemplateHasDeathCamera();
 			return;
+		}
 
 		PlayerTemplate.Components.Create<DeathrunPlayer>();
 		Log.Warning( $"PlayerTemplate '{PlayerTemplate.Name}' did not have DeathrunPlayer, so one was added. Add it in the scene/prefab for clearer setup." );
+		EnsureTemplateHasDeathCamera();
+	}
+
+	private void EnsureTemplateHasDeathCamera()
+	{
+		if ( !PlayerTemplate.IsValid() )
+			return;
+
+		if ( PlayerTemplate.Components.Get<DeathrunOrbitDeathCamera>().IsValid() )
+			return;
+
+		PlayerTemplate.Components.Create<DeathrunOrbitDeathCamera>();
+		Log.Warning( $"PlayerTemplate '{PlayerTemplate.Name}' did not have DeathrunOrbitDeathCamera, so one was added for owner-local death camera visuals." );
 	}
 
 	private void DisableSceneTemplate()
@@ -200,7 +254,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 		PlayerTemplate.Enabled = false;
 		_templateDisabled = true;
-		Log.Info( $"DeathrunNetworkManager disabled scene PlayerTemplate '{PlayerTemplate.Name}'. Runtime clones will be spawned per connection." );
+		LogDebug( $"DeathrunNetworkManager disabled scene PlayerTemplate '{PlayerTemplate.Name}'. Runtime clones will be spawned per connection." );
 	}
 
 	private bool HasPlayerForConnection( Connection connection )
@@ -224,7 +278,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		if ( spawnPoints.Length > 0 )
 		{
 			var spawnPoint = spawnPoints[_spawnIndex++ % spawnPoints.Length];
-			Log.Info( $"Selected spawn point '{spawnPoint.GameObject.Name}' with priority {spawnPoint.Priority} at {spawnPoint.WorldPosition}." );
+			LogDebug( $"Selected spawn point '{spawnPoint.GameObject.Name}' with priority {spawnPoint.Priority} at {spawnPoint.WorldPosition}." );
 			return spawnPoint.WorldTransform.WithScale( 1.0f );
 		}
 
@@ -256,6 +310,35 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 			.WithPosition( WorldPosition + offset )
 			.WithRotation( WorldRotation )
 			.WithScale( 1.0f );
+	}
+
+	private static void ClearPlayerVelocity( GameObject playerObject )
+	{
+		if ( !playerObject.IsValid() )
+			return;
+
+		var controller = playerObject.Components.Get<PlayerController>();
+
+		if ( controller.IsValid() && controller.Body.IsValid() )
+		{
+			controller.Body.MotionEnabled = true;
+			controller.Body.Velocity = Vector3.Zero;
+			return;
+		}
+
+		var body = playerObject.Components.Get<Rigidbody>();
+
+		if ( body.IsValid() )
+		{
+			body.MotionEnabled = true;
+			body.Velocity = Vector3.Zero;
+		}
+	}
+
+	private void LogDebug( string message )
+	{
+		if ( LogNetworking )
+			Log.Info( message );
 	}
 
 	private static string DescribeConnection( Connection connection )

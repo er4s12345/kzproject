@@ -8,30 +8,46 @@ public sealed class DeathrunHealth : Component
 {
 	[Property] public float MaxHealth { get; set; } = 100.0f;
 
-	// Sync keeps this readable on clients for debugging/UI. If your S&box build rejects host writes
-	// to sync properties on client-owned players, move health state to a host-owned child or mirror it with RPC later.
-	[Sync, Property] public float CurrentHealth { get; set; }
-	[Sync, Property] public bool IsDead { get; set; }
+	// The player object is client-owned for movement, but health/death is decided by the host.
+	// SyncFlags.FromHost makes these values readable on clients without letting the owner drive death state.
+	[Sync( SyncFlags.FromHost ), Property] public float CurrentHealth { get; set; }
+	[Sync( SyncFlags.FromHost ), Property] public bool IsDead { get; set; }
 
 	[Property] public bool Invulnerable { get; set; } = false;
 	[Property] public bool CanTakeDamage { get; set; } = true;
 	[Property] public bool DieOnAnyDamage { get; set; } = false;
 	[Property] public bool RespawnOnDeath { get; set; } = true;
-	[Property] public float RespawnDelay { get; set; } = 2.0f;
-	[Property] public bool LogDamage { get; set; } = true;
+	[Property] public float RespawnDelay { get; set; } = 5.0f;
+	[Property] public bool LogDamage { get; set; } = false;
 	[Property] public bool DisableInputOnDeath { get; set; } = true;
+	[Property] public bool FreezeBodyOnDeath { get; set; } = true;
 
 	public bool IsAlive => !IsDead;
 
 	private PlayerController _playerController;
+	private Rigidbody _body;
 	private bool _storedUseInputControls;
+	private bool _storedUseLookControls;
+	private bool _storedUseCameraControls;
+	private bool _storedBodyMotionEnabled;
 	private bool _hasStoredInputState;
+	private bool _hasStoredBodyState;
 	private bool _respawnQueued;
+	private bool _respawnInProgress;
+	private int _respawnGeneration;
+	private Vector3 _initialSpawnPosition;
+	private Rotation _initialSpawnRotation;
+	private Vector3 _lastDeathPosition;
 
 	protected override void OnStart()
 	{
 		_playerController = Components.Get<PlayerController>();
-		ResetHealth();
+		_body = GetBody();
+		_initialSpawnPosition = WorldPosition;
+		_initialSpawnRotation = WorldRotation;
+
+		if ( Networking.IsHost || !Game.IsPlaying )
+			ResetHealth();
 	}
 
 	public bool TakeDamage( DeathrunDamageInfo damageInfo )
@@ -45,7 +61,12 @@ public sealed class DeathrunHealth : Component
 		}
 
 		if ( !CanTakeDamage || Invulnerable || IsDead )
+		{
+			if ( LogDamage && IsDead )
+				Log.Info( $"Ignoring {damageInfo.DamageType} damage for '{GameObject.Name}' because the player is already dead." );
+
 			return false;
+		}
 
 		var amount = MathF.Max( 0.0f, damageInfo.Amount );
 
@@ -88,7 +109,9 @@ public sealed class DeathrunHealth : Component
 		CurrentHealth = MaxHealth;
 		IsDead = false;
 		_respawnQueued = false;
-		RestoreInput();
+		_respawnInProgress = false;
+		SetMovementEnabled( true );
+		ResetRespawnSensitiveComponents();
 
 		if ( LogDamage )
 			Log.Info( $"'{GameObject.Name}' health reset to {CurrentHealth:0.##}/{MaxHealth:0.##}." );
@@ -112,63 +135,297 @@ public sealed class DeathrunHealth : Component
 	private void Die( DeathrunDamageInfo damageInfo )
 	{
 		if ( IsDead )
+		{
+			if ( LogDamage )
+				Log.Info( $"Die ignored for '{GameObject.Name}' because the player is already dead." );
+
 			return;
+		}
+
+		if ( _respawnQueued || _respawnInProgress )
+		{
+			if ( LogDamage )
+				Log.Info( $"Die ignored for '{GameObject.Name}' because a respawn is already queued or running." );
+
+			return;
+		}
 
 		IsDead = true;
 		CurrentHealth = 0.0f;
-		DisableInput();
+		_lastDeathPosition = WorldPosition;
+		SetMovementEnabled( false );
+		StartDeathVisualsRpc( _lastDeathPosition );
 
-		Log.Info( $"'{GameObject.Name}' died. Type={damageInfo.DamageType}, Reason='{damageInfo.Reason ?? "none"}', InvalidatesRun={damageInfo.InvalidatesRun}." );
+		if ( LogDamage )
+			Log.Info( $"Die called for '{GameObject.Name}'. Type={damageInfo.DamageType}, Reason='{damageInfo.Reason ?? "none"}', InvalidatesRun={damageInfo.InvalidatesRun}." );
 
 		// TODO: Notify run tracking / checkpoint / leaderboard systems here when they exist.
 		// damageInfo.InvalidatesRun is the hook to mark a competitive run invalid.
 
 		if ( RespawnOnDeath && !_respawnQueued )
 			QueueRespawn();
+		else if ( !RespawnOnDeath )
+		{
+			if ( LogDamage )
+				Log.Info( $"'{GameObject.Name}' will stay dead because RespawnOnDeath is disabled." );
+		}
 	}
 
 	private async void QueueRespawn()
 	{
 		_respawnQueued = true;
-		await Task.DelayRealtimeSeconds( MathF.Max( 0.0f, RespawnDelay ) );
+		var generation = ++_respawnGeneration;
+		var delay = MathF.Max( 0.0f, RespawnDelay );
+
+		if ( LogDamage )
+			Log.Info( $"'{GameObject.Name}' respawn delay started: {delay:0.##} second(s)." );
+
+		try
+		{
+			await GameTask.DelaySeconds( delay, GameObject.EnabledToken );
+		}
+		catch ( TaskCanceledException )
+		{
+			if ( LogDamage )
+				Log.Info( $"'{GameObject.Name}' respawn delay cancelled because the player object was disabled or destroyed." );
+
+			return;
+		}
 
 		if ( !IsValid || !GameObject.IsValid() || !Networking.IsHost )
 			return;
 
-		// TODO: Integrate with DeathrunNetworkManager/checkpoints for a project-specific respawn point.
-		// For now this restores health/input in place, which keeps the MVP damage flow safe.
-		ResetHealth();
+		if ( generation != _respawnGeneration || !IsDead )
+		{
+			if ( LogDamage )
+				Log.Info( $"'{GameObject.Name}' respawn delay completed but respawn was skipped. Generation={generation}, CurrentGeneration={_respawnGeneration}, IsDead={IsDead}." );
+
+			return;
+		}
+
+		if ( LogDamage )
+			Log.Info( $"'{GameObject.Name}' respawn delay completed after {delay:0.##} second(s)." );
+
+		RespawnNow();
 	}
 
-	private void DisableInput()
+	private void RespawnNow()
+	{
+		if ( !Networking.IsHost )
+		{
+			Log.Warning( $"Ignoring RespawnNow for '{GameObject.Name}' on a client. Respawning is host-authoritative." );
+			return;
+		}
+
+		if ( !IsDead )
+		{
+			if ( LogDamage )
+				Log.Info( $"Respawn skipped for '{GameObject.Name}' because the player is no longer dead." );
+
+			return;
+		}
+
+		if ( _respawnInProgress )
+		{
+			if ( LogDamage )
+				Log.Info( $"Respawn skipped for '{GameObject.Name}' because a respawn is already in progress." );
+
+			return;
+		}
+
+		_respawnInProgress = true;
+
+		if ( LogDamage )
+			Log.Info( $"Respawn started for '{GameObject.Name}'." );
+
+		if ( !TryMoveToRespawnPoint() )
+			FallbackRespawnMove();
+
+		ResetHealth();
+		FinishRespawnVisualsRpc( WorldPosition, WorldRotation );
+
+		if ( LogDamage )
+			Log.Info( $"Respawn completed for '{GameObject.Name}' at {WorldPosition}." );
+	}
+
+	private bool TryMoveToRespawnPoint()
+	{
+		var player = Components.Get<DeathrunPlayer>();
+
+		if ( !player.IsValid() )
+		{
+			Log.Warning( $"'{GameObject.Name}' has no DeathrunPlayer marker, so DeathrunHealth will use fallback respawn movement." );
+			return false;
+		}
+
+		var manager = Scene.GetAllComponents<DeathrunNetworkManager>()
+			.FirstOrDefault( x => x.IsValid() );
+
+		if ( !manager.IsValid() )
+		{
+			Log.Warning( $"No DeathrunNetworkManager found for '{GameObject.Name}', so DeathrunHealth will use fallback respawn movement." );
+			return false;
+		}
+
+		return manager.TryMovePlayerToRespawn( player );
+	}
+
+	private void FallbackRespawnMove()
+	{
+		WorldPosition = _initialSpawnPosition;
+		WorldRotation = _initialSpawnRotation;
+		ClearVelocity();
+
+		if ( GameObject.Network.Active )
+			GameObject.Network.ClearInterpolation();
+
+		Log.Warning( $"Fallback respawn moved '{GameObject.Name}' to its initial spawn position {_initialSpawnPosition}. TODO: replace this with checkpoint-aware respawn when checkpoints exist." );
+	}
+
+	private void SetMovementEnabled( bool enabled )
 	{
 		if ( !DisableInputOnDeath )
 			return;
 
 		_playerController ??= Components.Get<PlayerController>();
 
-		if ( !_playerController.IsValid() )
-			return;
-
-		if ( !_hasStoredInputState )
+		if ( _playerController.IsValid() )
 		{
-			_storedUseInputControls = _playerController.UseInputControls;
-			_hasStoredInputState = true;
+			if ( !enabled )
+			{
+				if ( !_hasStoredInputState )
+				{
+					_storedUseInputControls = _playerController.UseInputControls;
+					_storedUseLookControls = _playerController.UseLookControls;
+					_storedUseCameraControls = _playerController.UseCameraControls;
+					_hasStoredInputState = true;
+				}
+
+				_playerController.UseInputControls = false;
+				_playerController.UseLookControls = false;
+				_playerController.UseCameraControls = false;
+			}
+			else if ( _hasStoredInputState )
+			{
+				_playerController.UseInputControls = _storedUseInputControls;
+				_playerController.UseLookControls = _storedUseLookControls;
+				_playerController.UseCameraControls = _storedUseCameraControls;
+				_hasStoredInputState = false;
+
+				if ( LogDamage )
+					Log.Info( $"'{GameObject.Name}' PlayerController input/camera restored. Input={_playerController.UseInputControls}, Look={_playerController.UseLookControls}, Camera={_playerController.UseCameraControls}." );
+			}
+		}
+		else if ( !enabled )
+		{
+			Log.Warning( $"'{GameObject.Name}' has no PlayerController to disable on death." );
 		}
 
-		_playerController.UseInputControls = false;
+		_body = GetBody();
 
-		if ( _playerController.Body.IsValid() )
-			_playerController.Body.Velocity = Vector3.Zero;
+		if ( _body.IsValid() )
+		{
+			if ( !enabled )
+			{
+				if ( !_hasStoredBodyState )
+				{
+					_storedBodyMotionEnabled = _body.MotionEnabled;
+					_hasStoredBodyState = true;
+				}
+
+				_body.Velocity = Vector3.Zero;
+
+				if ( FreezeBodyOnDeath )
+					_body.MotionEnabled = false;
+			}
+			else if ( _hasStoredBodyState )
+			{
+				_body.MotionEnabled = _storedBodyMotionEnabled;
+				_body.Velocity = Vector3.Zero;
+				_hasStoredBodyState = false;
+
+				if ( LogDamage )
+					Log.Info( $"'{GameObject.Name}' Rigidbody motion restored. MotionEnabled={_body.MotionEnabled}." );
+			}
+		}
+
+		if ( LogDamage )
+			Log.Info( $"'{GameObject.Name}' movement/input {(enabled ? "restored" : "disabled")}." );
 	}
 
-	private void RestoreInput()
+	private Rigidbody GetBody()
 	{
 		_playerController ??= Components.Get<PlayerController>();
 
-		if ( !_playerController.IsValid() || !_hasStoredInputState )
+		if ( _playerController.IsValid() && _playerController.Body.IsValid() )
+			return _playerController.Body;
+
+		return Components.Get<Rigidbody>();
+	}
+
+	private void ClearVelocity()
+	{
+		_body = GetBody();
+
+		if ( _body.IsValid() )
+			_body.Velocity = Vector3.Zero;
+	}
+
+	private void ResetRespawnSensitiveComponents()
+	{
+		var fallDamage = Components.Get<DeathrunFallDamage>();
+
+		if ( fallDamage.IsValid() )
+			fallDamage.ResetFallTracking();
+	}
+
+	[Rpc.Owner]
+	public void StartDeathVisualsRpc( Vector3 deathPosition )
+	{
+		if ( Rpc.Calling && !Rpc.Caller.IsHost )
 			return;
 
-		_playerController.UseInputControls = _storedUseInputControls;
+		if ( !ShouldRunOwnerVisuals() )
+			return;
+
+		SetMovementEnabled( false );
+
+		var deathCamera = Components.GetOrCreate<DeathrunOrbitDeathCamera>();
+		deathCamera.StartDeathCamera( GameObject, deathPosition );
+
+		if ( LogDamage )
+			Log.Info( $"Owner death camera started for local player '{GameObject.Name}' at {deathPosition}." );
+	}
+
+	[Rpc.Owner]
+	public void FinishRespawnVisualsRpc( Vector3 respawnPosition, Rotation respawnRotation )
+	{
+		if ( Rpc.Calling && !Rpc.Caller.IsHost )
+			return;
+
+		if ( !ShouldRunOwnerVisuals() )
+			return;
+
+		WorldPosition = respawnPosition;
+		WorldRotation = respawnRotation;
+		ClearVelocity();
+
+		if ( GameObject.Network.Active )
+			GameObject.Network.ClearInterpolation();
+
+		var deathCamera = Components.Get<DeathrunOrbitDeathCamera>();
+
+		if ( deathCamera.IsValid() )
+			deathCamera.StopDeathCamera();
+
+		SetMovementEnabled( true );
+
+		if ( LogDamage )
+			Log.Info( $"Owner death camera stopped and controls restored for local player '{GameObject.Name}'." );
+	}
+
+	private bool ShouldRunOwnerVisuals()
+	{
+		return !GameObject.Network.Active || GameObject.Network.IsOwner;
 	}
 }

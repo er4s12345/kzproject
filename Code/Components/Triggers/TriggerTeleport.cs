@@ -23,22 +23,36 @@ namespace Sandbox.Components.Triggers
 		[Property, Required]
 		private GameObject TeleportDestination { get; set; }
 
+		[Property]
+		[Description( "If false, players with DeathrunHealth will not be teleported by this trigger. Use false for old reset-to-spawn volumes so DeathrunHealth owns respawn timing." )]
+		public bool TeleportDeathrunPlayers { get; set; } = true;
+
+		[Property]
+		[Description( "If true, blocked DeathrunHealth players are killed instead of teleported, allowing DeathrunHealth's delayed respawn flow to handle them." )]
+		public bool KillBlockedDeathrunPlayers { get; set; } = false;
+
+		[Property]
+		[Description( "If false, dead DeathrunHealth players will not be teleported. Leave false for Deathrun death/respawn flow." )]
+		public bool TeleportDeadPlayers { get; set; } = false;
+
 		private Vector3 _TeleportDestLocation = Vector3.Zero;
 
 		protected bool CanTeleport(GameObject Object)
 		{
 			if ( !CanTrigger() ) return false;
-			if ( Object == null ) return false;
+			if ( !Object.IsValid() ) return false;
 			
-			bool IsPlayer = Object.Components.Get<PlayerController>() != null;
-			bool IsPhysics = Object.Components.Get<Rigidbody>() != null;
-			bool TagFilterPassed = true;
+			var Health = Object.Components.GetInAncestorsOrSelf<DeathrunHealth>();
+			bool IsDeathrunPlayer = Health.IsValid();
+			bool IsDeadPlayer = Health.IsValid() && Health.IsDead;
 
-			if ( TagFilter.Any() )
-				TagFilterPassed = Object.Tags.HasAny( TagFilter );
-			
+			if ( IsDeathrunPlayer && !TeleportDeathrunPlayers )
+				return false;
 
-			return TagFilterPassed && ((TeleportPlayers && IsPlayer) || ( TeleportPhysics && IsPhysics ));
+			if ( IsDeadPlayer && !TeleportDeadPlayers )
+				return false;
+
+			return MatchesTeleportFilter( Object );
 		}
 
 		protected override void OnAwake()
@@ -83,26 +97,118 @@ namespace Sandbox.Components.Triggers
 
 		void ITriggerListener.OnTriggerEnter( GameObject other )
 		{
-			if ( other is not null && CanTeleport( other ) )
+			if ( Networking.IsActive && !Networking.IsHost )
+				return;
+
+			var Target = ResolveTeleportTarget( other );
+
+			if ( TryHandleBlockedDeathrunPlayer( Target, other ) )
+				return;
+
+			if ( Target.IsValid() && CanTeleport( Target ) )
 			{
 				// Check if destination has destination volume component, if so, get random position inside the volume for teleportation.
 				TeleportDestinationVolume DestinstaitonVolume = TeleportDestination.Components.Get<TeleportDestinationVolume>();
 				if( DestinstaitonVolume != null )
-					_TeleportDestLocation = DestinstaitonVolume.GetRandomPositionFor( other );
+					_TeleportDestLocation = DestinstaitonVolume.GetRandomPositionFor( Target );
+				else
+					_TeleportDestLocation = TeleportDestination.WorldPosition;
 				
 
 				if (ResetVelocity)
 				{
-					var rigidbody = other.Components.Get<Rigidbody>();
+					var controller = Target.Components.GetInAncestorsOrSelf<PlayerController>();
+					var rigidbody = controller.IsValid() && controller.Body.IsValid()
+						? controller.Body
+						: Target.Components.GetInAncestorsOrSelf<Rigidbody>();
+
 					if ( rigidbody.IsValid() )
 						rigidbody.Velocity = Vector3.Zero;
 				}
 
-				other.WorldPosition = _TeleportDestLocation;
+				Target.WorldPosition = _TeleportDestLocation;
+
+				if ( Target.Network.Active )
+					Target.Network.ClearInterpolation();
+
 				LastTriggerTime = Time.Now;
 
 				if ( OnlyOnce ) DestroyGameObject();
 			}
+		}
+
+		private bool TryHandleBlockedDeathrunPlayer( GameObject Target, GameObject TriggeringObject )
+		{
+			if ( !Target.IsValid() || !CanTrigger() )
+				return false;
+
+			var Health = Target.Components.GetInAncestorsOrSelf<DeathrunHealth>();
+
+			if ( !Health.IsValid() || TeleportDeathrunPlayers )
+				return false;
+
+			if ( !MatchesTeleportFilter( Target ) )
+				return false;
+
+			if ( KillBlockedDeathrunPlayers && !Health.IsDead )
+			{
+				var hitPosition = TriggeringObject.IsValid() ? TriggeringObject.WorldPosition : Target.WorldPosition;
+
+				if ( Health.TakeDamage( new DeathrunDamageInfo
+				{
+					Amount = Health.MaxHealth,
+					DamageType = DeathrunDamageType.KillZone,
+					Source = GameObject,
+					SourcePosition = WorldPosition,
+					HitPosition = hitPosition,
+					Reason = $"Entered teleport trigger '{GameObject.Name}'",
+					IsLethal = true,
+					InvalidatesRun = true
+				} ) )
+				{
+					LastTriggerTime = Time.Now;
+				}
+			}
+
+			return true;
+		}
+
+		private bool MatchesTeleportFilter( GameObject Object )
+		{
+			if ( !Object.IsValid() )
+				return false;
+
+			bool IsPlayer = Object.Components.GetInAncestorsOrSelf<PlayerController>().IsValid();
+			bool IsPhysics = Object.Components.GetInAncestorsOrSelf<Rigidbody>().IsValid();
+			bool TagFilterPassed = true;
+
+			if ( TagFilter.Any() )
+				TagFilterPassed = Object.Tags.HasAny( TagFilter );
+
+			return TagFilterPassed && ((TeleportPlayers && IsPlayer) || ( TeleportPhysics && IsPhysics ));
+		}
+
+		private static GameObject ResolveTeleportTarget( GameObject other )
+		{
+			if ( !other.IsValid() )
+				return null;
+
+			var Health = other.Components.GetInAncestorsOrSelf<DeathrunHealth>();
+
+			if ( Health.IsValid() )
+				return Health.GameObject;
+
+			var PlayerController = other.Components.GetInAncestorsOrSelf<PlayerController>();
+
+			if ( PlayerController.IsValid() )
+				return PlayerController.GameObject;
+
+			var Rigidbody = other.Components.GetInAncestorsOrSelf<Rigidbody>();
+
+			if ( Rigidbody.IsValid() )
+				return Rigidbody.GameObject;
+
+			return other;
 		}
 
 	}

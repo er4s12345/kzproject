@@ -10,7 +10,7 @@ public sealed class DeathrunDamageVolume : Component, Component.ITriggerListener
 	[Property] public DeathrunDamageType DamageType { get; set; } = DeathrunDamageType.Fire;
 	[Property] public bool RequireStayInside { get; set; } = true;
 	[Property] public bool InvalidatesRun { get; set; } = true;
-	[Property] public bool LogDamageVolume { get; set; } = true;
+	[Property] public bool LogDamageVolume { get; set; } = false;
 
 	private readonly HashSet<DeathrunHealth> _inside = new();
 	private Collider _triggerCollider;

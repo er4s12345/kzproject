@@ -7,7 +7,7 @@ public sealed class DeathrunKillZone : Component, Component.ITriggerListener
 	[Property] public bool KillInstantly { get; set; } = true;
 	[Property] public DeathrunDamageType DamageType { get; set; } = DeathrunDamageType.KillZone;
 	[Property] public bool InvalidatesRun { get; set; } = true;
-	[Property] public bool LogKillZone { get; set; } = true;
+	[Property] public bool LogKillZone { get; set; } = false;
 
 	private Collider _triggerCollider;
 

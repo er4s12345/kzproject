@@ -13,7 +13,7 @@ public sealed class DeathrunFallDamage : Component
 	[Property] public float MaxDamage { get; set; } = 100.0f;
 	[Property] public float GraceTimeAfterSpawn { get; set; } = 1.0f;
 	[Property] public bool IgnoreFallDamageWhenDead { get; set; } = true;
-	[Property] public bool LogFallDamage { get; set; } = true;
+	[Property] public bool LogFallDamage { get; set; } = false;
 
 	private DeathrunHealth _health;
 	private PlayerController _playerController;
@@ -27,9 +27,17 @@ public sealed class DeathrunFallDamage : Component
 		_health = Components.Get<DeathrunHealth>();
 		_playerController = Components.Get<PlayerController>();
 		_body = Components.Get<Rigidbody>();
+		ResetFallTracking();
+	}
+
+	public void ResetFallTracking()
+	{
 		_wasGrounded = IsGrounded();
 		_worstFallSpeed = 0.0f;
 		_timeSinceStarted = 0.0f;
+
+		if ( LogFallDamage )
+			Log.Info( $"'{GameObject.Name}' fall damage tracking reset." );
 	}
 
 	protected override void OnFixedUpdate()

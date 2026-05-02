@@ -263,9 +263,10 @@
           "CurrentHealth": 100,
           "DieOnAnyDamage": false,
           "DisableInputOnDeath": true,
+          "FreezeBodyOnDeath": true,
           "Invulnerable": false,
           "IsDead": false,
-          "LogDamage": true,
+          "LogDamage": false,
           "MaxHealth": 100,
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
@@ -273,7 +274,7 @@
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
           "OnComponentUpdate": null,
-          "RespawnDelay": 2,
+          "RespawnDelay": 5,
           "RespawnOnDeath": true
         },
         {
@@ -286,7 +287,7 @@
           "FatalFallSpeed": 1400,
           "GraceTimeAfterSpawn": 1,
           "IgnoreFallDamageWhenDead": true,
-          "LogFallDamage": true,
+          "LogFallDamage": false,
           "MaxDamage": 100,
           "MinDamage": 5,
           "MinFallSpeed": 650,
@@ -307,7 +308,7 @@
           "EnablePhysicsDamage": true,
           "FatalImpactSpeed": 1800,
           "IgnoreSelfOwnedObjects": true,
-          "LogPhysicsDamage": true,
+          "LogPhysicsDamage": false,
           "MaxDamage": 100,
           "MinDamage": 5,
           "MinImpactSpeed": 500,
@@ -317,6 +318,25 @@
           "OnComponentFixedUpdate": null,
           "OnComponentStart": null,
           "OnComponentUpdate": null
+        },
+        {
+          "__type": "DeathrunOrbitDeathCamera",
+          "__guid": "3af14988-420a-4a3d-9b65-50efcc3dbf6e",
+          "__enabled": true,
+          "Flags": 0,
+          "AutoRotate": true,
+          "Distance": 180,
+          "EnableMouseOrbit": true,
+          "Height": 80,
+          "LogCamera": false,
+          "LookAtHeight": 48,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "OrbitSpeed": 30
         }
       ],
       "Children": [
@@ -592,10 +612,13 @@
           "ResetVelocity": false,
           "RetriggerDelay": 0.5,
           "TagFilter": "",
+          "KillBlockedDeathrunPlayers": true,
           "TeleportDestination": {
             "_type": "gameobject",
             "go": "ea588be4-13fc-4ed9-a262-568ec0906928"
           },
+          "TeleportDeadPlayers": false,
+          "TeleportDeathrunPlayers": false,
           "TeleportPhysics": true,
           "TeleportPlayers": true
         }
