@@ -26,6 +26,7 @@ public sealed class DeathrunHealth : Component
 
 	private PlayerController _playerController;
 	private Rigidbody _body;
+	private DeathrunRagdollOnDeath _ragdollOnDeath;
 	private bool _storedUseInputControls;
 	private bool _storedUseLookControls;
 	private bool _storedUseCameraControls;
@@ -43,6 +44,7 @@ public sealed class DeathrunHealth : Component
 	{
 		_playerController = Components.Get<PlayerController>();
 		_body = GetBody();
+		_ragdollOnDeath = Components.Get<DeathrunRagdollOnDeath>();
 		_initialSpawnPosition = WorldPosition;
 		_initialSpawnRotation = WorldRotation;
 
@@ -111,6 +113,8 @@ public sealed class DeathrunHealth : Component
 		_respawnQueued = false;
 		_respawnInProgress = false;
 		SetMovementEnabled( true );
+		CleanupDeathRagdoll();
+		SetLiveBodyHiddenForClients( false );
 		ResetRespawnSensitiveComponents();
 
 		if ( LogDamage )
@@ -153,8 +157,13 @@ public sealed class DeathrunHealth : Component
 		IsDead = true;
 		CurrentHealth = 0.0f;
 		_lastDeathPosition = WorldPosition;
+		var deathCameraTarget = CreateDeathRagdoll( damageInfo );
+
+		if ( deathCameraTarget.IsValid() && deathCameraTarget != GameObject )
+			SetLiveBodyHiddenForClients( true );
+
 		SetMovementEnabled( false );
-		StartDeathVisualsRpc( _lastDeathPosition );
+		StartDeathVisualsRpc( _lastDeathPosition, deathCameraTarget );
 
 		if ( LogDamage )
 			Log.Info( $"Die called for '{GameObject.Name}'. Type={damageInfo.DamageType}, Reason='{damageInfo.Reason ?? "none"}', InvalidatesRun={damageInfo.InvalidatesRun}." );
@@ -379,8 +388,64 @@ public sealed class DeathrunHealth : Component
 			fallDamage.ResetFallTracking();
 	}
 
+	private GameObject CreateDeathRagdoll( DeathrunDamageInfo damageInfo )
+	{
+		_ragdollOnDeath = GetRagdollOnDeath();
+
+		if ( !_ragdollOnDeath.IsValid() )
+			return GameObject;
+
+		var ragdoll = _ragdollOnDeath.CreateDeathRagdoll( damageInfo, _lastDeathPosition, WorldRotation );
+
+		if ( ragdoll.IsValid() )
+			return ragdoll;
+
+		return GameObject;
+	}
+
+	private void CleanupDeathRagdoll()
+	{
+		_ragdollOnDeath = GetRagdollOnDeath();
+
+		if ( _ragdollOnDeath.IsValid() )
+			_ragdollOnDeath.CleanupAfterRespawn();
+	}
+
+	private DeathrunRagdollOnDeath GetRagdollOnDeath()
+	{
+		if ( !_ragdollOnDeath.IsValid() )
+			_ragdollOnDeath = Components.Get<DeathrunRagdollOnDeath>();
+
+		return _ragdollOnDeath;
+	}
+
+	private void SetLiveBodyHiddenForClients( bool hidden )
+	{
+		if ( !Game.IsPlaying || !GameObject.Network.Active )
+			return;
+
+		SetLiveBodyHiddenRpc( hidden );
+	}
+
+	[Rpc.Broadcast]
+	public void SetLiveBodyHiddenRpc( bool hidden )
+	{
+		if ( Rpc.Calling && !Rpc.Caller.IsHost )
+			return;
+
+		var ragdollOnDeath = GetRagdollOnDeath();
+
+		if ( !ragdollOnDeath.IsValid() )
+			return;
+
+		if ( hidden )
+			ragdollOnDeath.HideLiveBodyVisuals();
+		else
+			ragdollOnDeath.RestoreLiveBodyVisuals();
+	}
+
 	[Rpc.Owner]
-	public void StartDeathVisualsRpc( Vector3 deathPosition )
+	public void StartDeathVisualsRpc( Vector3 deathPosition, GameObject cameraTarget )
 	{
 		if ( Rpc.Calling && !Rpc.Caller.IsHost )
 			return;
@@ -391,10 +456,11 @@ public sealed class DeathrunHealth : Component
 		SetMovementEnabled( false );
 
 		var deathCamera = Components.GetOrCreate<DeathrunOrbitDeathCamera>();
-		deathCamera.StartDeathCamera( GameObject, deathPosition );
+		var target = cameraTarget.IsValid() ? cameraTarget : GameObject;
+		deathCamera.StartDeathCamera( target, deathPosition );
 
 		if ( LogDamage )
-			Log.Info( $"Owner death camera started for local player '{GameObject.Name}' at {deathPosition}." );
+			Log.Info( $"Owner death camera started for local player '{GameObject.Name}' at {deathPosition}. Target='{target.Name}'." );
 	}
 
 	[Rpc.Owner]

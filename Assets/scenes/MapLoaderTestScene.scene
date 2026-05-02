@@ -337,6 +337,26 @@
           "OnComponentStart": null,
           "OnComponentUpdate": null,
           "OrbitSpeed": 30
+        },
+        {
+          "__type": "DeathrunRagdollOnDeath",
+          "__guid": "2de31f31-0191-4929-b9bc-c8351491415c",
+          "__enabled": true,
+          "Flags": 0,
+          "ApplyDeathForce": true,
+          "CopyPlayerTransform": true,
+          "DeathForceMultiplier": 1,
+          "DestroyRagdollOnRespawn": true,
+          "EnableRagdollOnDeath": true,
+          "HideLiveBodyOnDeath": true,
+          "LogRagdoll": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "RagdollLifetime": 5
         }
       ],
       "Children": [

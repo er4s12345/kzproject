@@ -169,7 +169,14 @@ public sealed class DeathrunOrbitDeathCamera : Component
 	private Vector3 GetLookAtPosition()
 	{
 		if ( _target.IsValid() )
+		{
+			var ragdollPhysics = _target.Components.Get<ModelPhysics>();
+
+			if ( ragdollPhysics.IsValid() && ragdollPhysics.Bodies is not null && ragdollPhysics.Bodies.Count > 0 )
+				return ragdollPhysics.MassCenter;
+
 			return _target.WorldPosition + Vector3.Up * LookAtHeight;
+		}
 
 		return _deathPosition + Vector3.Up * LookAtHeight;
 	}

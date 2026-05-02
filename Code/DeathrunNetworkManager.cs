@@ -125,6 +125,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 		var deathrunPlayer = playerObject.Components.GetOrCreate<DeathrunPlayer>();
 		playerObject.Components.GetOrCreate<DeathrunOrbitDeathCamera>();
+		playerObject.Components.GetOrCreate<DeathrunRagdollOnDeath>();
 
 		var spawnSucceeded = playerObject.NetworkSpawn( connection );
 		deathrunPlayer.Initialize( connection );
@@ -210,6 +211,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		PlayerTemplate = templates[0];
 		LogDebug( $"AutoFindPlayerTemplate selected '{PlayerTemplate.Name}'." );
 		EnsureTemplateHasDeathCamera();
+		EnsureTemplateHasDeathRagdoll();
 		return true;
 	}
 
@@ -221,12 +223,14 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		if ( PlayerTemplate.Components.Get<DeathrunPlayer>().IsValid() )
 		{
 			EnsureTemplateHasDeathCamera();
+			EnsureTemplateHasDeathRagdoll();
 			return;
 		}
 
 		PlayerTemplate.Components.Create<DeathrunPlayer>();
 		Log.Warning( $"PlayerTemplate '{PlayerTemplate.Name}' did not have DeathrunPlayer, so one was added. Add it in the scene/prefab for clearer setup." );
 		EnsureTemplateHasDeathCamera();
+		EnsureTemplateHasDeathRagdoll();
 	}
 
 	private void EnsureTemplateHasDeathCamera()
@@ -239,6 +243,18 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 		PlayerTemplate.Components.Create<DeathrunOrbitDeathCamera>();
 		Log.Warning( $"PlayerTemplate '{PlayerTemplate.Name}' did not have DeathrunOrbitDeathCamera, so one was added for owner-local death camera visuals." );
+	}
+
+	private void EnsureTemplateHasDeathRagdoll()
+	{
+		if ( !PlayerTemplate.IsValid() )
+			return;
+
+		if ( PlayerTemplate.Components.Get<DeathrunRagdollOnDeath>().IsValid() )
+			return;
+
+		PlayerTemplate.Components.Create<DeathrunRagdollOnDeath>();
+		Log.Warning( $"PlayerTemplate '{PlayerTemplate.Name}' did not have DeathrunRagdollOnDeath, so one was added for death corpse visuals." );
 	}
 
 	private void DisableSceneTemplate()
