@@ -559,7 +559,7 @@
       "__guid": "3998b967-a2ca-44f7-8f43-f748b9c9bdb5",
       "__version": 2,
       "Flags": 0,
-      "Name": "TriggerTeleport To Spawn",
+      "Name": "Void Kill Zone And Prop Teleport",
       "Position": "503.148621,181.711792,-296.246246",
       "Rotation": "0,0,0,1",
       "Scale": "1,1,1",
@@ -612,15 +612,30 @@
           "ResetVelocity": false,
           "RetriggerDelay": 0.5,
           "TagFilter": "",
-          "KillBlockedDeathrunPlayers": true,
+          "LogTeleport": false,
           "TeleportDestination": {
             "_type": "gameobject",
             "go": "ea588be4-13fc-4ed9-a262-568ec0906928"
           },
-          "TeleportDeadPlayers": false,
-          "TeleportDeathrunPlayers": false,
           "TeleportPhysics": true,
-          "TeleportPlayers": true
+          "TeleportPlayers": false
+        },
+        {
+          "__type": "DeathrunKillZone",
+          "__guid": "079afa79-4414-4310-9e55-02ac9446bd53",
+          "__enabled": true,
+          "Flags": 0,
+          "DamageAmount": 9999,
+          "DamageType": "Void",
+          "InvalidatesRun": true,
+          "KillInstantly": true,
+          "LogKillZone": true,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null
         }
       ],
       "Children": []

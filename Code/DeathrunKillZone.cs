@@ -7,7 +7,7 @@ public sealed class DeathrunKillZone : Component, Component.ITriggerListener
 	[Property] public bool KillInstantly { get; set; } = true;
 	[Property] public DeathrunDamageType DamageType { get; set; } = DeathrunDamageType.KillZone;
 	[Property] public bool InvalidatesRun { get; set; } = true;
-	[Property] public bool LogKillZone { get; set; } = false;
+	[Property] public bool LogKillZone { get; set; } = true;
 
 	private Collider _triggerCollider;
 
@@ -27,7 +27,7 @@ public sealed class DeathrunKillZone : Component, Component.ITriggerListener
 
 		var health = FindHealth( other );
 
-		if ( !health.IsValid() )
+		if ( !health.IsValid() || health.IsDead )
 			return;
 
 		if ( LogKillZone )
@@ -39,7 +39,7 @@ public sealed class DeathrunKillZone : Component, Component.ITriggerListener
 			DamageType = DamageType,
 			Source = GameObject,
 			SourcePosition = WorldPosition,
-			HitPosition = other.IsValid() ? other.WorldPosition : WorldPosition,
+			HitPosition = health.WorldPosition,
 			Reason = $"Entered kill zone '{GameObject.Name}'",
 			IsLethal = KillInstantly,
 			InvalidatesRun = InvalidatesRun
@@ -52,6 +52,14 @@ public sealed class DeathrunKillZone : Component, Component.ITriggerListener
 
 	private static DeathrunHealth FindHealth( GameObject other )
 	{
-		return other.IsValid() ? other.Components.GetInAncestorsOrSelf<DeathrunHealth>() : null;
+		if ( !other.IsValid() )
+			return null;
+
+		var health = other.Components.GetInAncestorsOrSelf<DeathrunHealth>();
+
+		if ( health.IsValid() )
+			return health;
+
+		return other.Components.GetInDescendantsOrSelf<DeathrunHealth>( true );
 	}
 }
