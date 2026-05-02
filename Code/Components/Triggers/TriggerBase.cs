@@ -6,7 +6,7 @@ namespace Sandbox.Components.Triggers
 {
 
 	/**
-	 * Base class for triggers. It contains common logic like drawing gizmos, definign required components
+	 * Base class for triggers. It contains common logic like drawing gizmos, required components
 	 */
 	public abstract class  TriggerBase : Component
 	{

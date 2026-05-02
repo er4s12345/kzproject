@@ -247,6 +247,7 @@
           "__guid": "86d6e077-10d2-40a0-a532-2575edc7ecbb",
           "__enabled": true,
           "Flags": 0,
+          "LogPlayerLifecycle": false,
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
           "OnComponentEnabled": null,
@@ -522,6 +523,7 @@
           "AutoFindPlayerTemplate": true,
           "DisableTemplateOnStart": true,
           "FallbackSpawnOffset": "0,0,80",
+          "LogNetworking": false,
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
           "OnComponentEnabled": null,
@@ -622,6 +624,7 @@
           "__guid": "83ede902-a5ed-4ff1-9f08-013471ce55f9",
           "__enabled": true,
           "Flags": 0,
+          "LogTeleport": false,
           "OnComponentDestroy": null,
           "OnComponentDisabled": null,
           "OnComponentEnabled": null,
@@ -632,13 +635,12 @@
           "ResetVelocity": false,
           "RetriggerDelay": 0.5,
           "TagFilter": "",
-          "LogTeleport": false,
           "TeleportDestination": {
             "_type": "gameobject",
             "go": "ea588be4-13fc-4ed9-a262-568ec0906928"
           },
           "TeleportPhysics": true,
-          "TeleportPlayers": false
+          "TeleportPlayers": true
         },
         {
           "__type": "DeathrunKillZone",
@@ -910,13 +912,13 @@
       "CustomBounds": false
     },
     "GameObjectSystems": {
+      "Sandbox.MovieMaker.MovieRecorderSystem": {
+        "DisableClientRecording": false
+      },
       "Sandbox.SelectionSetsSystem": {
         "Data": {
           "SelectionSets": []
         }
-      },
-      "Sandbox.MovieMaker.MovieRecorderSystem": {
-        "DisableClientRecording": false
       },
       "Sandbox.Clutter.ClutterGridSystem": {
         "Storage": {
