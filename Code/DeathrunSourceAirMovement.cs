@@ -20,6 +20,7 @@ public sealed class DeathrunSourceAirMovement : Component
 	[Property] public float StrafeMultiplier { get; set; } = 1.0f;
 	[Property] public bool PreserveMomentum { get; set; } = true;
 	[Property] public bool EnableBunnyhop { get; set; } = false;
+	[Property] public string JumpButton { get; set; } = "Jump";
 	[Property] public float AutoJumpWindow { get; set; } = 0.1f;
 	[Property] public float GroundFriction { get; set; } = 6.0f;
 	[Property] public float GroundAcceleration { get; set; } = 10.0f;
@@ -34,6 +35,8 @@ public sealed class DeathrunSourceAirMovement : Component
 	private bool _jumpPressedQueued;
 	private bool _wasDead;
 	private bool _skipMovementAfterRespawn;
+	private string _lastBlockedReason;
+	private TimeSince _timeSinceLastStateLog;
 	private TimeSince _timeSinceJumpPressed;
 
 	protected override void OnStart()
@@ -41,6 +44,7 @@ public sealed class DeathrunSourceAirMovement : Component
 		CacheComponents();
 		_timeSinceJumpPressed = AutoJumpWindow + 1.0f;
 		_wasDead = IsDead();
+		LogMovementState( "started" );
 	}
 
 	protected override void OnDisabled()
@@ -57,16 +61,18 @@ public sealed class DeathrunSourceAirMovement : Component
 	{
 		UpdateDeathState();
 
-		if ( !CanRunMovement() )
+		if ( !CanRunMovement( out var blockedReason ) )
 		{
 			ClearBufferedInput();
+			LogBlockedState( blockedReason );
 			return;
 		}
 
-		if ( Input.Pressed( "jump" ) )
+		if ( IsJumpPressed() )
 		{
 			_jumpPressedQueued = true;
 			_timeSinceJumpPressed = 0.0f;
+			LogMovementState( "jump input pressed" );
 		}
 	}
 
@@ -78,12 +84,14 @@ public sealed class DeathrunSourceAirMovement : Component
 		if ( !_playerController.IsValid() )
 		{
 			ClearBufferedInput();
+			LogBlockedState( "missing PlayerController" );
 			return;
 		}
 
 		if ( !HasLocalMovementControl() )
 		{
 			ClearBufferedInput();
+			LogBlockedState( "not local owner" );
 
 			if ( !IsDead() )
 				RestorePlayerControllerInput();
@@ -94,6 +102,7 @@ public sealed class DeathrunSourceAirMovement : Component
 		if ( IsDead() )
 		{
 			ClearBufferedInput();
+			LogBlockedState( "dead" );
 			return;
 		}
 
@@ -101,6 +110,7 @@ public sealed class DeathrunSourceAirMovement : Component
 		{
 			ClearBufferedInput();
 			RestorePlayerControllerInput();
+			LogBlockedState( "disabled" );
 			return;
 		}
 
@@ -114,6 +124,7 @@ public sealed class DeathrunSourceAirMovement : Component
 			else
 				RestorePlayerControllerInput();
 
+			LogMovementState( "respawn movement resume deferred" );
 			return;
 		}
 
@@ -253,7 +264,7 @@ public sealed class DeathrunSourceAirMovement : Component
 			return;
 
 		var wantsJump = EnableBunnyhop
-			? Input.Down( "jump" ) || _timeSinceJumpPressed <= MathF.Max( 0.0f, AutoJumpWindow )
+			? IsJumpDown() || _timeSinceJumpPressed <= MathF.Max( 0.0f, AutoJumpWindow )
 			: _jumpPressedQueued;
 
 		if ( !wantsJump )
@@ -264,7 +275,7 @@ public sealed class DeathrunSourceAirMovement : Component
 		_playerController.Jump( Vector3.Up * _playerController.JumpSpeed );
 
 		if ( LogMovementDebug )
-			Log.Info( $"SourceAir '{GameObject.Name}' jump applied. Bunnyhop={EnableBunnyhop}." );
+			Log.Info( $"SourceAir '{GameObject.Name}' jump applied. Bunnyhop={EnableBunnyhop}, button='{JumpButton}', driver={Driver}." );
 	}
 
 	private Vector3 ClampHorizontalVelocity( Vector3 velocity, float maxSpeed )
@@ -305,6 +316,7 @@ public sealed class DeathrunSourceAirMovement : Component
 				_storedUseInputControls = _playerController.UseInputControls;
 				_hasStoredUseInputControls = true;
 				_fullWishVelocityActive = true;
+				LogMovementState( "FullWishVelocity taking input control" );
 			}
 
 			_playerController.UseInputControls = false;
@@ -330,17 +342,50 @@ public sealed class DeathrunSourceAirMovement : Component
 		_playerController.UseInputControls = _storedUseInputControls;
 		_fullWishVelocityActive = false;
 		_hasStoredUseInputControls = false;
+		LogMovementState( "restored PlayerController input" );
 	}
 
 	private bool CanRunMovement()
 	{
+		return CanRunMovement( out _ );
+	}
+
+	private bool CanRunMovement( out string blockedReason )
+	{
 		CacheComponents();
 
-		return EnableSourceAirMovement
-			&& _playerController.IsValid()
-			&& !IsDead()
-			&& HasLocalMovementControl()
-			&& !_skipMovementAfterRespawn;
+		if ( !EnableSourceAirMovement )
+		{
+			blockedReason = "disabled";
+			return false;
+		}
+
+		if ( !_playerController.IsValid() )
+		{
+			blockedReason = "missing PlayerController";
+			return false;
+		}
+
+		if ( IsDead() )
+		{
+			blockedReason = "dead";
+			return false;
+		}
+
+		if ( !HasLocalMovementControl() )
+		{
+			blockedReason = "not local owner";
+			return false;
+		}
+
+		if ( _skipMovementAfterRespawn )
+		{
+			blockedReason = "respawn defer";
+			return false;
+		}
+
+		blockedReason = null;
+		return true;
 	}
 
 	private void UpdateDeathState()
@@ -356,6 +401,7 @@ public sealed class DeathrunSourceAirMovement : Component
 		{
 			ClearBufferedInput();
 			_skipMovementAfterRespawn = true;
+			LogMovementState( "alive after death state sync" );
 		}
 
 		_wasDead = isDead;
@@ -365,6 +411,50 @@ public sealed class DeathrunSourceAirMovement : Component
 	{
 		_jumpPressedQueued = false;
 		_timeSinceJumpPressed = AutoJumpWindow + 1.0f;
+	}
+
+	private bool IsJumpPressed()
+	{
+		return !string.IsNullOrWhiteSpace( JumpButton ) && Input.Pressed( JumpButton );
+	}
+
+	private bool IsJumpDown()
+	{
+		return !string.IsNullOrWhiteSpace( JumpButton ) && Input.Down( JumpButton );
+	}
+
+	private void LogBlockedState( string reason )
+	{
+		if ( !LogMovementDebug )
+			return;
+
+		if ( _lastBlockedReason == reason && _timeSinceLastStateLog < 1.0f )
+			return;
+
+		_lastBlockedReason = reason;
+		LogMovementState( $"blocked: {reason}" );
+	}
+
+	private void LogMovementState( string reason )
+	{
+		if ( !LogMovementDebug )
+			return;
+
+		_timeSinceLastStateLog = 0.0f;
+		var owner = GameObject.Network.Owner;
+		var ownerName = owner?.DisplayName ?? "none";
+		var ownerId = owner?.Id.ToString() ?? GameObject.Network.OwnerId.ToString();
+		var networkActive = GameObject.Network.Active;
+		var isOwner = networkActive && GameObject.Network.IsOwner;
+		var hasLocalControl = HasLocalMovementControl();
+		var jumpPressed = IsJumpPressed();
+		var jumpDown = IsJumpDown();
+
+		Log.Info(
+			$"SourceAir '{GameObject.Name}' {reason}. Owner={ownerName} ({ownerId}), NetworkActive={networkActive}, IsOwner={isOwner}, HasLocalControl={hasLocalControl}, " +
+			$"Input={_playerController.IsValid() && _playerController.UseInputControls}, Look={_playerController.IsValid() && _playerController.UseLookControls}, Camera={_playerController.IsValid() && _playerController.UseCameraControls}, " +
+			$"IsDead={IsDead()}, IsOnGround={_playerController.IsValid() && _playerController.IsOnGround}, JumpSpeed={(_playerController.IsValid() ? _playerController.JumpSpeed : 0.0f):0.##}, " +
+			$"Driver={Driver}, JumpButton='{JumpButton}', JumpPressed={jumpPressed}, JumpDown={jumpDown}." );
 	}
 
 	private bool IsDead()
