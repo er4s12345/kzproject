@@ -63,7 +63,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	public Vector3 Velocity { get; private set; }
 	public Vector3 GroundVelocity { get; private set; }
-	public bool IsOnGround => GroundObject.IsValid();
+	public bool IsOnGround => _isOnGround;
 	public bool IsAirborne => !IsOnGround;
 	public GameObject GroundObject { get; private set; }
 	public Component GroundComponent { get; private set; }
@@ -79,6 +79,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private TimeSince _timeSinceJump;
 	private TimeSince _timeSinceDebugLog;
 	private TimeUntil _preventGrounding;
+	private bool _isOnGround;
 	private float _cameraDistance = 100.0f;
 	private float _smoothedEyeZ;
 
@@ -211,8 +212,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			return;
 
 		_preventGrounding = 0.2f;
-		GroundObject = null;
-		GroundComponent = null;
+		ClearGround();
 
 		var currentVelocity = Body.Velocity;
 
@@ -633,12 +633,20 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private void SetGround( SceneTraceResult trace )
 	{
 		var body = trace.Body;
-		GroundObject = body?.GameObject;
-		GroundComponent = body?.Component;
+		GroundObject = trace.GameObject;
+		GroundComponent = trace.Component ?? trace.Collider ?? body?.Component;
 		GroundSurface = trace.Surface;
+		_isOnGround = true;
 		_timeSinceGrounded = 0.0f;
 
-		if ( GroundComponent is Collider collider )
+		if ( !GroundObject.IsValid() && GroundComponent.IsValid() )
+			GroundObject = GroundComponent.GameObject;
+		else if ( !GroundObject.IsValid() )
+			GroundObject = body?.GameObject;
+
+		if ( trace.Collider.IsValid() )
+			GroundVelocity = trace.Collider.GetVelocityAtPoint( WorldPosition );
+		else if ( GroundComponent is Collider collider )
 			GroundVelocity = collider.GetVelocityAtPoint( WorldPosition );
 		else if ( GroundComponent is Rigidbody rigidbody )
 			GroundVelocity = rigidbody.GetVelocityAtPoint( WorldPosition );
@@ -651,6 +659,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( IsOnGround )
 			_timeSinceUngrounded = 0.0f;
 
+		_isOnGround = false;
 		GroundObject = null;
 		GroundComponent = null;
 		GroundSurface = null;
