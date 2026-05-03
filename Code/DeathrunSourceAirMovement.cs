@@ -3,7 +3,7 @@ using System;
 [Title( "Deathrun Source Air Movement" )]
 [Category( "Deathrun" )]
 [Icon( "air" )]
-public sealed class DeathrunSourceAirMovement : Component
+public sealed class DeathrunSourceAirMovement : Component, Component.INetworkSpawn
 {
 	public enum DriverMode
 	{
@@ -27,14 +27,17 @@ public sealed class DeathrunSourceAirMovement : Component
 	[Property] public float MaxGroundSpeed { get; set; } = 320.0f;
 	[Property] public bool LogMovementDebug { get; set; } = false;
 
+	private DeathrunPlayerController _deathrunController;
 	private PlayerController _playerController;
 	private DeathrunHealth _health;
+	private DeathrunPlayer _deathrunPlayer;
 	private bool _storedUseInputControls;
 	private bool _hasStoredUseInputControls;
 	private bool _fullWishVelocityActive;
 	private bool _jumpPressedQueued;
 	private bool _wasDead;
 	private bool _skipMovementAfterRespawn;
+	private bool _loggedProjectControllerBlock;
 	private string _lastBlockedReason;
 	private TimeSince _timeSinceLastStateLog;
 	private TimeSince _timeSinceJumpPressed;
@@ -42,9 +45,23 @@ public sealed class DeathrunSourceAirMovement : Component
 	protected override void OnStart()
 	{
 		CacheComponents();
+
+		if ( DisableWhenProjectControllerPresent( "started" ) )
+			return;
+
 		_timeSinceJumpPressed = AutoJumpWindow + 1.0f;
 		_wasDead = IsDead();
 		LogMovementState( "started" );
+	}
+
+	public void OnNetworkSpawn( Connection owner )
+	{
+		CacheComponents();
+
+		if ( DisableWhenProjectControllerPresent( "network spawn" ) )
+			return;
+
+		LogMovementState( $"network spawned with owner {owner?.DisplayName ?? "none"} ({owner?.Id.ToString() ?? "none"})" );
 	}
 
 	protected override void OnDisabled()
@@ -59,6 +76,9 @@ public sealed class DeathrunSourceAirMovement : Component
 
 	protected override void OnUpdate()
 	{
+		if ( DisableWhenProjectControllerPresent( "update" ) )
+			return;
+
 		UpdateDeathState();
 
 		if ( !CanRunMovement( out var blockedReason ) )
@@ -79,6 +99,10 @@ public sealed class DeathrunSourceAirMovement : Component
 	protected override void OnFixedUpdate()
 	{
 		CacheComponents();
+
+		if ( DisableWhenProjectControllerPresent( "fixed update" ) )
+			return;
+
 		UpdateDeathState();
 
 		if ( !_playerController.IsValid() )
@@ -360,6 +384,12 @@ public sealed class DeathrunSourceAirMovement : Component
 			return false;
 		}
 
+		if ( _deathrunController.IsValid() )
+		{
+			blockedReason = "DeathrunPlayerController owns movement";
+			return false;
+		}
+
 		if ( !_playerController.IsValid() )
 		{
 			blockedReason = "missing PlayerController";
@@ -446,12 +476,13 @@ public sealed class DeathrunSourceAirMovement : Component
 		var ownerId = owner?.Id.ToString() ?? GameObject.Network.OwnerId.ToString();
 		var networkActive = GameObject.Network.Active;
 		var isOwner = networkActive && GameObject.Network.IsOwner;
+		var isProxy = networkActive && GameObject.Network.IsProxy;
 		var hasLocalControl = HasLocalMovementControl();
-		var jumpPressed = IsJumpPressed();
-		var jumpDown = IsJumpDown();
+		var jumpPressed = hasLocalControl && IsJumpPressed();
+		var jumpDown = hasLocalControl && IsJumpDown();
 
 		Log.Info(
-			$"SourceAir '{GameObject.Name}' {reason}. Owner={ownerName} ({ownerId}), NetworkActive={networkActive}, IsOwner={isOwner}, HasLocalControl={hasLocalControl}, " +
+			$"SourceAir '{GameObject.Name}' {reason}. Owner={ownerName} ({ownerId}), NetworkActive={networkActive}, IsOwner={isOwner}, IsProxy={isProxy}, HasLocalControl={hasLocalControl}, " +
 			$"Input={_playerController.IsValid() && _playerController.UseInputControls}, Look={_playerController.IsValid() && _playerController.UseLookControls}, Camera={_playerController.IsValid() && _playerController.UseCameraControls}, " +
 			$"IsDead={IsDead()}, IsOnGround={_playerController.IsValid() && _playerController.IsOnGround}, JumpSpeed={(_playerController.IsValid() ? _playerController.JumpSpeed : 0.0f):0.##}, " +
 			$"Driver={Driver}, JumpButton='{JumpButton}', JumpPressed={jumpPressed}, JumpDown={jumpDown}." );
@@ -465,18 +496,50 @@ public sealed class DeathrunSourceAirMovement : Component
 
 	private bool HasLocalMovementControl()
 	{
+		if ( _deathrunController.IsValid() )
+			return _deathrunController.ShouldProcessLocalInput();
+
+		if ( _deathrunPlayer.IsValid() )
+			return _deathrunPlayer.ShouldProcessLocalInput();
+
 		if ( !GameObject.Network.Active )
 			return !Networking.IsActive;
 
-		return GameObject.Network.IsOwner;
+		return !GameObject.Network.IsProxy;
 	}
 
 	private void CacheComponents()
 	{
+		if ( !_deathrunController.IsValid() )
+			_deathrunController = Components.Get<DeathrunPlayerController>();
+
 		if ( !_playerController.IsValid() )
 			_playerController = Components.Get<PlayerController>();
 
 		if ( !_health.IsValid() )
 			_health = Components.Get<DeathrunHealth>();
+
+		if ( !_deathrunPlayer.IsValid() )
+			_deathrunPlayer = Components.Get<DeathrunPlayer>();
+	}
+
+	private bool DisableWhenProjectControllerPresent( string reason )
+	{
+		if ( !_deathrunController.IsValid() )
+			_deathrunController = Components.Get<DeathrunPlayerController>();
+
+		if ( !_deathrunController.IsValid() )
+			return false;
+
+		EnableSourceAirMovement = false;
+
+		if ( !_loggedProjectControllerBlock && LogMovementDebug )
+		{
+			_loggedProjectControllerBlock = true;
+			Log.Info( $"SourceAir '{GameObject.Name}' disabled during {reason} because DeathrunPlayerController now owns movement and air control." );
+		}
+
+		Enabled = false;
+		return true;
 	}
 }

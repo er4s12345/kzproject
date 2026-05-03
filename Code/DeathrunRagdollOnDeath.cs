@@ -19,7 +19,7 @@ public sealed class DeathrunRagdollOnDeath : Component
 	public GameObject CurrentRagdoll => _currentRagdoll;
 
 	private readonly List<RendererState> _hiddenRenderers = new();
-	private PlayerController _playerController;
+	private DeathrunPlayerController _playerController;
 	private GameObject _currentRagdoll;
 	private ModelPhysics _currentRagdollPhysics;
 	private bool _liveBodyHidden;
@@ -48,13 +48,13 @@ public sealed class DeathrunRagdollOnDeath : Component
 
 		if ( !_playerController.IsValid() )
 		{
-			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' needs a PlayerController to use built-in PlayerController.CreateRagdoll." );
+			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' needs a DeathrunPlayerController to create a project-local ragdoll." );
 			return null;
 		}
 
 		if ( !_playerController.Renderer.IsValid() )
 		{
-			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' needs PlayerController.Renderer assigned to create a built-in ragdoll." );
+			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' needs DeathrunPlayerController.Renderer assigned to create a project-local ragdoll." );
 			return null;
 		}
 
@@ -63,7 +63,7 @@ public sealed class DeathrunRagdollOnDeath : Component
 
 		if ( !ragdoll.IsValid() )
 		{
-			Log.Warning( $"PlayerController.CreateRagdoll returned no ragdoll for '{GameObject.Name}'." );
+			Log.Warning( $"DeathrunPlayerController.CreateRagdoll returned no ragdoll for '{GameObject.Name}'." );
 			return null;
 		}
 
@@ -88,7 +88,7 @@ public sealed class DeathrunRagdollOnDeath : Component
 		if ( LogRagdoll )
 		{
 			var bodyCount = _currentRagdollPhysics.IsValid() && _currentRagdollPhysics.Bodies is not null ? _currentRagdollPhysics.Bodies.Count : 0;
-			Log.Info( $"DeathrunRagdollOnDeath created built-in ragdoll '{ragdoll.Name}' for '{GameObject.Name}' at {ragdoll.WorldPosition}. PhysicsBodies={bodyCount}, NetworkActive={ragdoll.Network.Active}." );
+			Log.Info( $"DeathrunRagdollOnDeath created project-local ragdoll '{ragdoll.Name}' for '{GameObject.Name}' at {ragdoll.WorldPosition}. PhysicsBodies={bodyCount}, NetworkActive={ragdoll.Network.Active}." );
 		}
 
 		return ragdoll;
@@ -118,7 +118,7 @@ public sealed class DeathrunRagdollOnDeath : Component
 	private void CacheComponents()
 	{
 		if ( !_playerController.IsValid() )
-			_playerController = Components.Get<PlayerController>();
+			_playerController = Components.Get<DeathrunPlayerController>();
 	}
 
 	private void LogBuiltInRagdollStatus()
@@ -128,7 +128,7 @@ public sealed class DeathrunRagdollOnDeath : Component
 
 		if ( !_playerController.IsValid() )
 		{
-			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' did not find a PlayerController. Built-in ragdoll creation is unavailable until one exists." );
+			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' did not find a DeathrunPlayerController. Project-local ragdoll creation is unavailable until one exists." );
 			return;
 		}
 
@@ -136,11 +136,11 @@ public sealed class DeathrunRagdollOnDeath : Component
 
 		if ( !renderer.IsValid() )
 		{
-			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' found PlayerController but no Renderer. Assign the live SkinnedModelRenderer for built-in ragdolls." );
+			Log.Warning( $"DeathrunRagdollOnDeath on '{GameObject.Name}' found DeathrunPlayerController but no Renderer. Assign the live SkinnedModelRenderer for project-local ragdolls." );
 			return;
 		}
 
-		Log.Info( $"DeathrunRagdollOnDeath on '{GameObject.Name}' using built-in PlayerController.CreateRagdoll. Renderer='{renderer.GameObject.Name}', Model='{renderer.Model?.Name ?? "none"}'." );
+		Log.Info( $"DeathrunRagdollOnDeath on '{GameObject.Name}' using DeathrunPlayerController.CreateRagdoll. Renderer='{renderer.GameObject.Name}', Model='{renderer.Model?.Name ?? "none"}'." );
 	}
 
 	private void NetworkSpawnRagdoll( GameObject ragdoll )

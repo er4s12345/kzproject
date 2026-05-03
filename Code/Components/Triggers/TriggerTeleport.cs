@@ -122,7 +122,8 @@ namespace Sandbox.Components.Triggers
 			if ( !target.IsValid() )
 				return false;
 
-			var isPlayer = target.Components.GetInAncestorsOrSelf<PlayerController>().IsValid();
+			var isPlayer = target.Components.GetInAncestorsOrSelf<global::DeathrunPlayerController>().IsValid()
+				|| target.Components.GetInAncestorsOrSelf<PlayerController>().IsValid();
 			var isPhysics = target.Components.GetInAncestorsOrSelf<Rigidbody>().IsValid();
 
 			if ( TagFilter.Any() && !target.Tags.HasAny( TagFilter ) )
@@ -139,6 +140,11 @@ namespace Sandbox.Components.Triggers
 			if ( !other.IsValid() )
 				return null;
 
+			var deathrunController = other.Components.GetInAncestorsOrSelf<global::DeathrunPlayerController>();
+
+			if ( deathrunController.IsValid() )
+				return deathrunController.GameObject;
+
 			var playerController = other.Components.GetInAncestorsOrSelf<PlayerController>();
 
 			if ( playerController.IsValid() )
@@ -154,6 +160,14 @@ namespace Sandbox.Components.Triggers
 
 		private static void ClearVelocity( GameObject target )
 		{
+			var deathrunController = target.Components.GetInAncestorsOrSelf<global::DeathrunPlayerController>();
+
+			if ( deathrunController.IsValid() )
+			{
+				deathrunController.ClearVelocity();
+				return;
+			}
+
 			var playerController = target.Components.GetInAncestorsOrSelf<PlayerController>();
 			var rigidbody = playerController.IsValid() && playerController.Body.IsValid()
 				? playerController.Body

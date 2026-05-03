@@ -16,7 +16,7 @@ public sealed class DeathrunFallDamage : Component
 	[Property] public bool LogFallDamage { get; set; } = false;
 
 	private DeathrunHealth _health;
-	private PlayerController _playerController;
+	private DeathrunPlayerController _playerController;
 	private Rigidbody _body;
 	private bool _wasGrounded;
 	private float _worstFallSpeed;
@@ -25,7 +25,7 @@ public sealed class DeathrunFallDamage : Component
 	protected override void OnStart()
 	{
 		_health = Components.Get<DeathrunHealth>();
-		_playerController = Components.Get<PlayerController>();
+		_playerController = Components.Get<DeathrunPlayerController>();
 		_body = Components.Get<Rigidbody>();
 		ResetFallTracking();
 	}
@@ -106,7 +106,7 @@ public sealed class DeathrunFallDamage : Component
 
 	private bool IsGrounded()
 	{
-		_playerController ??= Components.Get<PlayerController>();
+		_playerController ??= Components.Get<DeathrunPlayerController>();
 
 		if ( _playerController.IsValid() )
 			return _playerController.IsOnGround;
@@ -116,7 +116,7 @@ public sealed class DeathrunFallDamage : Component
 
 	private Vector3 GetVelocity()
 	{
-		_playerController ??= Components.Get<PlayerController>();
+		_playerController ??= Components.Get<DeathrunPlayerController>();
 
 		if ( _playerController.IsValid() )
 			return _playerController.Velocity;

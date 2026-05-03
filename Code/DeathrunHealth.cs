@@ -25,9 +25,11 @@ public sealed class DeathrunHealth : Component
 
 	public bool IsAlive => !IsDead;
 
-	private PlayerController _playerController;
+	private DeathrunPlayerController _playerController;
+	private PlayerController _legacyPlayerController;
 	private Rigidbody _body;
 	private DeathrunRagdollOnDeath _ragdollOnDeath;
+	private DeathrunPlayer _deathrunPlayer;
 	private bool _storedUseInputControls;
 	private bool _storedUseLookControls;
 	private bool _storedUseCameraControls;
@@ -43,9 +45,7 @@ public sealed class DeathrunHealth : Component
 
 	protected override void OnStart()
 	{
-		_playerController = Components.Get<PlayerController>();
-		_body = GetBody();
-		_ragdollOnDeath = Components.Get<DeathrunRagdollOnDeath>();
+		CacheRuntimeComponents();
 		_initialSpawnPosition = WorldPosition;
 		_initialSpawnRotation = WorldRotation;
 
@@ -123,6 +123,23 @@ public sealed class DeathrunHealth : Component
 
 		if ( LogDamage )
 			Log.Info( $"'{GameObject.Name}' health reset to {CurrentHealth:0.##}/{MaxHealth:0.##}." );
+	}
+
+	public void InitializeSpawnState()
+	{
+		if ( !Networking.IsHost && Game.IsPlaying )
+			return;
+
+		CurrentHealth = MaxHealth;
+		IsDead = false;
+		_respawnQueued = false;
+		_respawnInProgress = false;
+		_respawnGeneration++;
+		RestoreSpawnControllerState( "spawn initialized" );
+		CleanupDeathRagdoll();
+		SetLiveBodyHiddenForClients( false );
+		ResetRespawnSensitiveComponents();
+		LogRespawnState( "spawn initialized" );
 	}
 
 	public void Kill( string reason )
@@ -305,7 +322,8 @@ public sealed class DeathrunHealth : Component
 			return;
 		}
 
-		_playerController ??= Components.Get<PlayerController>();
+		_playerController ??= Components.Get<DeathrunPlayerController>();
+		DisableLegacyPlayerController();
 		LogRespawnState( $"before movement {(enabled ? "restore" : "disable")}" );
 
 		if ( _playerController.IsValid() )
@@ -324,20 +342,21 @@ public sealed class DeathrunHealth : Component
 				_playerController.UseLookControls = false;
 				_playerController.UseCameraControls = false;
 			}
-			else if ( _hasStoredInputState )
+			else
 			{
-				_playerController.UseInputControls = _storedUseInputControls;
-				_playerController.UseLookControls = _storedUseLookControls;
-				_playerController.UseCameraControls = _storedUseCameraControls;
+				_playerController.Enabled = true;
+				_playerController.UseInputControls = _hasStoredInputState ? _storedUseInputControls : true;
+				_playerController.UseLookControls = _hasStoredInputState ? _storedUseLookControls : true;
+				_playerController.UseCameraControls = _hasStoredInputState ? _storedUseCameraControls : true;
 				_hasStoredInputState = false;
 
 				if ( LogDamage )
-					Log.Info( $"'{GameObject.Name}' PlayerController input/camera restored. Input={_playerController.UseInputControls}, Look={_playerController.UseLookControls}, Camera={_playerController.UseCameraControls}." );
+					Log.Info( $"'{GameObject.Name}' DeathrunPlayerController input/camera restored. Input={_playerController.UseInputControls}, Look={_playerController.UseLookControls}, Camera={_playerController.UseCameraControls}." );
 			}
 		}
 		else if ( !enabled )
 		{
-			Log.Warning( $"'{GameObject.Name}' has no PlayerController to disable on death." );
+			Log.Warning( $"'{GameObject.Name}' has no DeathrunPlayerController to disable on death." );
 		}
 
 		_body = GetBody();
@@ -376,16 +395,29 @@ public sealed class DeathrunHealth : Component
 
 	private Rigidbody GetBody()
 	{
-		_playerController ??= Components.Get<PlayerController>();
+		_playerController ??= Components.Get<DeathrunPlayerController>();
 
 		if ( _playerController.IsValid() && _playerController.Body.IsValid() )
 			return _playerController.Body;
+
+		_legacyPlayerController ??= Components.Get<PlayerController>();
+
+		if ( _legacyPlayerController.IsValid() && _legacyPlayerController.Body.IsValid() )
+			return _legacyPlayerController.Body;
 
 		return Components.Get<Rigidbody>();
 	}
 
 	private void ClearVelocity()
 	{
+		_playerController ??= Components.Get<DeathrunPlayerController>();
+
+		if ( _playerController.IsValid() )
+		{
+			_playerController.ClearVelocity();
+			return;
+		}
+
 		_body = GetBody();
 
 		if ( _body.IsValid() )
@@ -506,9 +538,92 @@ public sealed class DeathrunHealth : Component
 			Log.Info( $"Owner death camera stopped and controls restored for local player '{GameObject.Name}'." );
 	}
 
+	[Rpc.Owner]
+	public void InitializeSpawnOwnerRpc()
+	{
+		if ( Rpc.Calling && !Rpc.Caller.IsHost )
+			return;
+
+		if ( !ShouldRunOwnerVisuals() )
+			return;
+
+		RestoreSpawnControllerState( "owner spawn initialized" );
+		LogRespawnState( "owner spawn initialized" );
+	}
+
+	private void RestoreSpawnControllerState( string reason )
+	{
+		CacheRuntimeComponents();
+		_hasStoredInputState = false;
+		_hasStoredBodyState = false;
+
+		if ( _playerController.IsValid() )
+			_playerController.InitializeSpawnState( reason );
+		else
+		{
+			Log.Warning( $"'{GameObject.Name}' has no DeathrunPlayerController during {reason}." );
+		}
+
+		DisableLegacyPlayerController();
+
+		if ( _body.IsValid() )
+		{
+			_body.Enabled = true;
+			_body.MotionEnabled = true;
+			_body.Velocity = Vector3.Zero;
+		}
+		else
+		{
+			Log.Warning( $"'{GameObject.Name}' has no Rigidbody/body during {reason}." );
+		}
+
+		var deathCamera = Components.Get<DeathrunOrbitDeathCamera>();
+
+		if ( deathCamera.IsValid() )
+			deathCamera.StopDeathCamera();
+
+		if ( LogRespawnDebug )
+			Log.Info( $"DeathrunHealth '{GameObject.Name}' restored spawn controller state. Reason={reason}." );
+	}
+
 	private bool ShouldRunOwnerVisuals()
 	{
-		return !GameObject.Network.Active || GameObject.Network.IsOwner;
+		_playerController ??= Components.Get<DeathrunPlayerController>();
+
+		if ( _playerController.IsValid() )
+			return _playerController.ShouldProcessLocalInput();
+
+		_deathrunPlayer ??= Components.Get<DeathrunPlayer>();
+
+		if ( _deathrunPlayer.IsValid() )
+			return _deathrunPlayer.ShouldProcessLocalInput();
+
+		if ( !GameObject.Network.Active )
+			return !Networking.IsActive;
+
+		return !GameObject.Network.IsProxy;
+	}
+
+	private void CacheRuntimeComponents()
+	{
+		_playerController = Components.Get<DeathrunPlayerController>();
+		_legacyPlayerController = Components.Get<PlayerController>();
+		_body = GetBody();
+		_ragdollOnDeath = Components.Get<DeathrunRagdollOnDeath>();
+		_deathrunPlayer = Components.Get<DeathrunPlayer>();
+	}
+
+	private void DisableLegacyPlayerController()
+	{
+		_legacyPlayerController ??= Components.Get<PlayerController>();
+
+		if ( !_legacyPlayerController.IsValid() )
+			return;
+
+		_legacyPlayerController.UseInputControls = false;
+		_legacyPlayerController.UseLookControls = false;
+		_legacyPlayerController.UseCameraControls = false;
+		_legacyPlayerController.Enabled = false;
 	}
 
 	private void LogRespawnState( string reason )
@@ -516,7 +631,8 @@ public sealed class DeathrunHealth : Component
 		if ( !LogRespawnDebug )
 			return;
 
-		_playerController ??= Components.Get<PlayerController>();
+		_playerController ??= Components.Get<DeathrunPlayerController>();
+		_legacyPlayerController ??= Components.Get<PlayerController>();
 		_body = GetBody();
 
 		var owner = GameObject.Network.Owner;
@@ -524,11 +640,14 @@ public sealed class DeathrunHealth : Component
 		var ownerId = owner?.Id.ToString() ?? GameObject.Network.OwnerId.ToString();
 		var networkActive = GameObject.Network.Active;
 		var isOwner = networkActive && GameObject.Network.IsOwner;
+		var isProxy = networkActive && GameObject.Network.IsProxy;
 
 		Log.Info(
-			$"DeathrunHealth '{GameObject.Name}' {reason}. Owner={ownerName} ({ownerId}), NetworkActive={networkActive}, IsOwner={isOwner}, IsHost={Networking.IsHost}, " +
+			$"DeathrunHealth '{GameObject.Name}' {reason}. Owner={ownerName} ({ownerId}), NetworkActive={networkActive}, IsOwner={isOwner}, IsProxy={isProxy}, IsHost={Networking.IsHost}, " +
 			$"IsDead={IsDead}, Health={CurrentHealth:0.##}/{MaxHealth:0.##}, Input={_playerController.IsValid() && _playerController.UseInputControls}, " +
 			$"Look={_playerController.IsValid() && _playerController.UseLookControls}, Camera={_playerController.IsValid() && _playerController.UseCameraControls}, " +
+			$"ControllerEnabled={_playerController.IsValid() && _playerController.Enabled}, ShouldProcessLocalInput={_playerController.IsValid() && _playerController.ShouldProcessLocalInput()}, " +
+			$"LegacyPlayerControllerPresent={_legacyPlayerController.IsValid()}, LegacyEnabled={_legacyPlayerController.IsValid() && _legacyPlayerController.Enabled}, " +
 			$"BodyValid={_body.IsValid()}, MotionEnabled={_body.IsValid() && _body.MotionEnabled}, Velocity={(_body.IsValid() ? _body.Velocity : Vector3.Zero)}." );
 	}
 }

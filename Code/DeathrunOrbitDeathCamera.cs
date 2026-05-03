@@ -33,7 +33,12 @@ public sealed class DeathrunOrbitDeathCamera : Component
 			return;
 		}
 
-		if ( GameObject.Network.Active && !GameObject.Network.IsOwner )
+		var player = Components.Get<DeathrunPlayer>();
+		var shouldRunLocal = player.IsValid()
+			? player.ShouldProcessLocalInput()
+			: (!GameObject.Network.Active ? !Networking.IsActive : !GameObject.Network.IsProxy);
+
+		if ( !shouldRunLocal )
 		{
 			if ( LogCamera )
 				Log.Info( $"DeathrunOrbitDeathCamera ignored start for proxy player '{GameObject.Name}'." );
