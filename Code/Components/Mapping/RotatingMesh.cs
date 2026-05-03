@@ -12,16 +12,24 @@ namespace Sandbox.Components.Mapping
 		FULLSPEED
 	}
 
-
+	/**
+	 * Component for rotating meshes, with optional acceleration and player interaction. Should be used for gameplay thing, not cosmetics ones.
+	 * NOTE: You have to MANUALLY SWITCH the network mode of the GameObject to NetworkMode.Object for this component to work properly. IF NOT it will be not visible in game for CLIENTS.
+	 */
 	public class RotatingMesh : Component, Component.IPressable
 	{
+		
+
 		[Property, ReadOnly]
+		[Category("Debug")]
 		[Sync(SyncFlags.FromHost), Change("OnStateChanged")] protected RotatingMeshState State { get; set; } = RotatingMeshState.IDLE;
 
 		[Property, ReadOnly]
+		[Category( "Debug" )]
 		[Sync( SyncFlags.FromHost )] protected RotatingMeshState PreviousState { get; set; } = RotatingMeshState.IDLE;
 
 		[Property, ReadOnly]
+		[Category( "Debug" )]
 		[Sync(SyncFlags.FromHost)] protected float CurrentRotationSpeed { get; set; } = 0f;
 
 		[Property]
@@ -55,23 +63,30 @@ namespace Sandbox.Components.Mapping
 		Vector2 PitchRange { get; set; } = new Vector2(0.75f, 1.25f);
 
 
+		// Debug only-editor properties
+		[Property, Group( "Debug" )]
+		private bool DebugLog { get; set; } = false;
+
+
 		protected SoundHandle _rotatingSoundHandle;
 
 
-		[Property, Sync( SyncFlags.FromHost )] protected TimeSince _lastTimeStateChanged { get; set; } = 999.9f;
+		[Property] protected TimeSince _lastTimeStateChanged { get; set; } = 999.9f;
 
-		protected override void OnAwake()
+		protected override void OnValidate()
 		{
-			// Change network state.
+			base.OnValidate();
+
 			GameObject.NetworkMode = NetworkMode.Object;
-			GameObject.Network.AlwaysTransmit = false;
-			GameObject.Network.Interpolation = true;
 		}
 
 		protected override void OnStart()
 		{
+			if( Networking.IsActive && !Networking.IsHost )
+				return;
+
 			if( StartEnabled )
-				Activate( GameObject );
+				Activate( GameObject );			
 		}
 
 		public bool Press( IPressable.Event e )
@@ -85,9 +100,11 @@ namespace Sandbox.Components.Mapping
 
 
 		[Rpc.Host]
+		[Description("Works like a toggle")]
 		public void Activate( GameObject Activator )
 		{
-			Log.Info( $"RotatingMesh activated by {Activator.Name}" );
+			if(Activator.IsValid() && DebugLog) // Only check it here, Activator is not mandatory arg
+				Log.Info( $"RotatingMesh({GameObject.Name}) activated by {Activator.Name}" );
 
 			switch ( State )
 			{
@@ -141,12 +158,22 @@ namespace Sandbox.Components.Mapping
 
 		public void SetState( RotatingMeshState newState )
 		{
+			if ( Networking.IsActive && !Networking.IsHost )
+			{
+				if(DebugLog)
+					Log.Warning( $"RotatingMesh ({GameObject.Name}): SetState called not on SERVER. Ignoring." );
+				return;
+			}
+
 			if ( State == newState )
 				return;
 
 			PreviousState = State;
 			State = newState;
-			_lastTimeStateChanged = Time.Now;
+			_lastTimeStateChanged = 0;
+
+			if(DebugLog)
+				Log.Info( $"[SERVER/HOST] RotatingMesh ({GameObject.Name}) state changed to {newState}" );
 		}
 
 		protected void Rotate( float speed )
@@ -168,7 +195,9 @@ namespace Sandbox.Components.Mapping
 
 		protected void OnStateChanged( RotatingMeshState oldState, RotatingMeshState newState )
 		{
-			Log.Info( $"RotatingMesh state changed from {oldState} to {newState}" );
+			if(DebugLog)
+				Log.Info( $"RotatingMesh ({GameObject.Name}) NETWORKED state changed from {oldState} to {newState}" );
+
 			PlayStateSound( newState );
 		}
 
@@ -211,7 +240,6 @@ namespace Sandbox.Components.Mapping
 			float t = RotationSpeed > 0 ? CurrentRotationSpeed / RotationSpeed : 0;
 			float pitch = float.Lerp( PitchRange.x, PitchRange.y, t );
 			_rotatingSoundHandle.Pitch = pitch;
-			Log.Info( $"Setting rotating sound pitch to {pitch} based on rotation speed {CurrentRotationSpeed}" );
 		}
 
 	}

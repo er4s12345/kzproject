@@ -18,6 +18,9 @@ namespace Sandbox.Components.Triggers
 		[Property, Required]
 		private GameObject TeleportDestination { get; set; }
 
+		[Property, Group("Events"), Doo.ArgumentHint<GameObject>("GameObject which was teleported")]
+		public Doo OnTeleported;
+
 		[Property]
 		[Description( "Log successful teleports and ignored trigger touches." )]
 		public bool LogTeleport { get; set; } = false;
@@ -29,15 +32,12 @@ namespace Sandbox.Components.Triggers
 			if ( !CanTrigger() || !target.IsValid() )
 				return false;
 
-			return MatchesTeleportFilter( target );
+			return MatchesFilter( target );
 		}
 
 		protected override void OnAwake()
 		{
-			TriggerCollider ??= Components.GetOrCreate<BoxCollider>();
-
-			if ( TriggerCollider.IsValid() )
-				TriggerCollider.IsTrigger = true;
+			base.OnAwake();
 
 			if ( !TeleportDestination.IsValid() )
 			{
@@ -45,10 +45,6 @@ namespace Sandbox.Components.Triggers
 				DestroyGameObject();
 				return;
 			}
-
-			_teleportDestinationLocation = TeleportDestination.WorldPosition;
-			GameObject.Tags.Add( "trigger" );
-			Tags.Add( "trigger" );
 		}
 
 		protected override void DrawGizmos()
@@ -70,10 +66,9 @@ namespace Sandbox.Components.Triggers
 			}
 		}
 
-		void ITriggerListener.OnTriggerEnter( GameObject other )
+		public override void OnTriggerEnter( GameObject other )
 		{
-			if ( Networking.IsActive && !Networking.IsHost )
-				return;
+			base.OnTriggerEnter( other );
 
 			var target = ResolveTeleportTarget( other );
 
@@ -98,13 +93,15 @@ namespace Sandbox.Components.Triggers
 			if ( target.Network.Active )
 				target.Network.ClearInterpolation();
 
-			LastTriggerTime = Time.Now;
 
 			if ( LogTeleport )
 				Log.Info( $"TriggerTeleport '{GameObject.Name}' moved '{target.Name}' to {_teleportDestinationLocation}." );
 
 			if ( OnlyOnce )
 				DestroyGameObject();
+
+			Run( OnTeleported, c => c.SetArgument( "GameObject", target ) );
+			LastTriggerTime = 0;
 		}
 
 		private Vector3 GetTeleportDestinationFor( GameObject target )
@@ -115,23 +112,6 @@ namespace Sandbox.Components.Triggers
 				return destinationVolume.GetRandomPositionFor( target );
 
 			return TeleportDestination.WorldPosition;
-		}
-
-		private bool MatchesTeleportFilter( GameObject target )
-		{
-			if ( !target.IsValid() )
-				return false;
-
-			var isPlayer = target.Components.GetInAncestorsOrSelf<PlayerController>().IsValid();
-			var isPhysics = target.Components.GetInAncestorsOrSelf<Rigidbody>().IsValid();
-
-			if ( TagFilter.Any() && !target.Tags.HasAny( TagFilter ) )
-				return false;
-
-			if ( isPlayer )
-				return TeleportPlayers;
-
-			return TeleportPhysics && isPhysics;
 		}
 
 		private static GameObject ResolveTeleportTarget( GameObject other )
