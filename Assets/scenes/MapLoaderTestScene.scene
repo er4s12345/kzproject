@@ -358,6 +358,32 @@
           "OnComponentStart": null,
           "OnComponentUpdate": null,
           "RagdollLifetime": 5
+        },
+        {
+          "__type": "DeathrunSourceAirMovement",
+          "__guid": "14e893f8-d04a-49d0-9c05-b551775f0027",
+          "__enabled": true,
+          "Flags": 0,
+          "AirAcceleration": 12,
+          "AirControl": 0.35,
+          "AutoJumpWindow": 0.1,
+          "Driver": "AdditiveAirControl",
+          "EnableBunnyhop": false,
+          "EnableSourceAirMovement": true,
+          "GroundAcceleration": 10,
+          "GroundFriction": 6,
+          "LogMovementDebug": false,
+          "MaxAirVelocity": 900,
+          "MaxAirWishSpeed": 420,
+          "MaxGroundSpeed": 320,
+          "OnComponentDestroy": null,
+          "OnComponentDisabled": null,
+          "OnComponentEnabled": null,
+          "OnComponentFixedUpdate": null,
+          "OnComponentStart": null,
+          "OnComponentUpdate": null,
+          "PreserveMomentum": true,
+          "StrafeMultiplier": 1
         }
       ],
       "Children": [
