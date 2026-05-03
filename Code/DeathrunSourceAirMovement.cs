@@ -32,12 +32,15 @@ public sealed class DeathrunSourceAirMovement : Component
 	private bool _hasStoredUseInputControls;
 	private bool _fullWishVelocityActive;
 	private bool _jumpPressedQueued;
+	private bool _wasDead;
+	private bool _skipMovementAfterRespawn;
 	private TimeSince _timeSinceJumpPressed;
 
 	protected override void OnStart()
 	{
 		CacheComponents();
 		_timeSinceJumpPressed = AutoJumpWindow + 1.0f;
+		_wasDead = IsDead();
 	}
 
 	protected override void OnDisabled()
@@ -52,9 +55,11 @@ public sealed class DeathrunSourceAirMovement : Component
 
 	protected override void OnUpdate()
 	{
+		UpdateDeathState();
+
 		if ( !CanRunMovement() )
 		{
-			_jumpPressedQueued = false;
+			ClearBufferedInput();
 			return;
 		}
 
@@ -68,19 +73,47 @@ public sealed class DeathrunSourceAirMovement : Component
 	protected override void OnFixedUpdate()
 	{
 		CacheComponents();
+		UpdateDeathState();
 
 		if ( !_playerController.IsValid() )
+		{
+			ClearBufferedInput();
 			return;
-
-		if ( IsDead() )
-			return;
+		}
 
 		if ( !HasLocalMovementControl() )
+		{
+			ClearBufferedInput();
+
+			if ( !IsDead() )
+				RestorePlayerControllerInput();
+
 			return;
+		}
+
+		if ( IsDead() )
+		{
+			ClearBufferedInput();
+			return;
+		}
 
 		if ( !EnableSourceAirMovement )
 		{
+			ClearBufferedInput();
 			RestorePlayerControllerInput();
+			return;
+		}
+
+		if ( _skipMovementAfterRespawn )
+		{
+			ClearBufferedInput();
+			_skipMovementAfterRespawn = false;
+
+			if ( Driver == DriverMode.FullWishVelocity )
+				UpdateDriverInputState();
+			else
+				RestorePlayerControllerInput();
+
 			return;
 		}
 
@@ -190,6 +223,9 @@ public sealed class DeathrunSourceAirMovement : Component
 	{
 		wishSpeed = 0.0f;
 
+		if ( !HasLocalMovementControl() || IsDead() )
+			return Vector3.Zero;
+
 		var input = Input.AnalogMove.WithZ( 0.0f );
 		var inputLength = input.Length;
 
@@ -210,6 +246,9 @@ public sealed class DeathrunSourceAirMovement : Component
 
 	private void TryBufferedJump()
 	{
+		if ( !HasLocalMovementControl() || IsDead() )
+			return;
+
 		if ( !_playerController.IsOnGround )
 			return;
 
@@ -285,9 +324,10 @@ public sealed class DeathrunSourceAirMovement : Component
 		if ( !_playerController.IsValid() )
 			return;
 
-		if ( !IsDead() )
-			_playerController.UseInputControls = _storedUseInputControls;
+		if ( IsDead() )
+			return;
 
+		_playerController.UseInputControls = _storedUseInputControls;
 		_fullWishVelocityActive = false;
 		_hasStoredUseInputControls = false;
 	}
@@ -299,7 +339,32 @@ public sealed class DeathrunSourceAirMovement : Component
 		return EnableSourceAirMovement
 			&& _playerController.IsValid()
 			&& !IsDead()
-			&& HasLocalMovementControl();
+			&& HasLocalMovementControl()
+			&& !_skipMovementAfterRespawn;
+	}
+
+	private void UpdateDeathState()
+	{
+		var isDead = IsDead();
+
+		if ( isDead )
+		{
+			ClearBufferedInput();
+			_skipMovementAfterRespawn = false;
+		}
+		else if ( _wasDead )
+		{
+			ClearBufferedInput();
+			_skipMovementAfterRespawn = true;
+		}
+
+		_wasDead = isDead;
+	}
+
+	private void ClearBufferedInput()
+	{
+		_jumpPressedQueued = false;
+		_timeSinceJumpPressed = AutoJumpWindow + 1.0f;
 	}
 
 	private bool IsDead()
@@ -310,7 +375,10 @@ public sealed class DeathrunSourceAirMovement : Component
 
 	private bool HasLocalMovementControl()
 	{
-		return !GameObject.Network.Active || GameObject.Network.IsOwner;
+		if ( !GameObject.Network.Active )
+			return !Networking.IsActive;
+
+		return GameObject.Network.IsOwner;
 	}
 
 	private void CacheComponents()
