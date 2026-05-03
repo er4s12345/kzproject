@@ -19,6 +19,14 @@ namespace Sandbox.Components.Triggers
 		private GameObject TeleportDestination { get; set; }
 
 		[Property]
+		[Description( "Teleport player/controller objects that enter the trigger." )]
+		public bool TeleportPlayers { get; set; } = true;
+
+		[Property]
+		[Description( "Teleport physics objects that enter the trigger." )]
+		public bool TeleportPhysics { get; set; } = true;
+
+		[Property]
 		[Description( "Log successful teleports and ignored trigger touches." )]
 		public bool LogTeleport { get; set; } = false;
 

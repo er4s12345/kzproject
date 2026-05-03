@@ -60,8 +60,9 @@ namespace Sandbox.Components.Triggers
 			if ( !target.IsValid() || !CanTrigger() )
 				return false;
 
-			var isPlayer = target.Components.GetInAncestorsOrSelf<PlayerController>().IsValid();
-			var isPhysics = target.Components.GetInAncestorsOrSelf<Rigidbody>().IsValid() && !isPlayer; // PlayerController also has rigidbody, so exclude objects with PlayerController from physics check
+			var isPlayer = target.Components.GetInAncestorsOrSelf<global::DeathrunPlayerController>().IsValid()
+				|| target.Components.GetInAncestorsOrSelf<PlayerController>().IsValid();
+			var isPhysics = target.Components.GetInAncestorsOrSelf<Rigidbody>().IsValid() && !isPlayer;
 
 			if ( TagFilter.Any() && !target.Tags.HasAny( TagFilter ) )
 				return false;

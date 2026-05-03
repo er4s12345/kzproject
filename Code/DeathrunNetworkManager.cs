@@ -125,7 +125,6 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 		var controller = playerObject.Components.GetOrCreate<DeathrunPlayerController>();
 		DisableLegacyMovement( playerObject );
-		DisableObsoleteSourceAirMovement( playerObject );
 		var deathrunPlayer = playerObject.Components.GetOrCreate<DeathrunPlayer>();
 		var health = playerObject.Components.GetOrCreate<DeathrunHealth>();
 		playerObject.Components.GetOrCreate<DeathrunOrbitDeathCamera>();
@@ -264,13 +263,11 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		if ( PlayerTemplate.Components.Get<DeathrunPlayerController>().IsValid() )
 		{
 			DisableLegacyMovement( PlayerTemplate );
-			DisableObsoleteSourceAirMovement( PlayerTemplate );
 			return;
 		}
 
 		PlayerTemplate.Components.Create<DeathrunPlayerController>();
 		DisableLegacyMovement( PlayerTemplate );
-		DisableObsoleteSourceAirMovement( PlayerTemplate );
 		Log.Warning( $"PlayerTemplate '{PlayerTemplate.Name}' did not have DeathrunPlayerController, so one was added. Add it in the scene/prefab for clearer setup." );
 	}
 
@@ -407,20 +404,6 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		legacy.Enabled = false;
 	}
 
-	private static void DisableObsoleteSourceAirMovement( GameObject playerObject )
-	{
-		if ( !playerObject.IsValid() )
-			return;
-
-		var sourceAir = playerObject.Components.Get<DeathrunSourceAirMovement>();
-
-		if ( !sourceAir.IsValid() )
-			return;
-
-		sourceAir.EnableSourceAirMovement = false;
-		sourceAir.Enabled = false;
-	}
-
 	private void LogDebug( string message )
 	{
 		if ( LogNetworking )
@@ -442,7 +425,6 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		var controller = playerObject.Components.Get<DeathrunPlayerController>();
 		var legacyController = playerObject.Components.Get<PlayerController>();
 		var health = playerObject.Components.Get<DeathrunHealth>();
-		var sourceAir = playerObject.Components.Get<DeathrunSourceAirMovement>();
 		var body = controller.IsValid() && controller.Body.IsValid()
 			? controller.Body
 			: playerObject.Components.Get<Rigidbody>();
@@ -451,7 +433,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 			$"DeathrunNetworkManager spawn {phase}: player='{playerObject.Name}', intendedOwner={DescribeConnection( intendedOwner )}, " +
 			$"networkOwner={DescribeConnection( network.Owner )}, ownerId={network.OwnerId}, active={network.Active}, isOwnerHere={network.IsOwner}, isProxyHere={network.IsProxy}, " +
 			$"networkMode={playerObject.NetworkMode}, enabled={playerObject.Enabled}, position={playerObject.WorldPosition}, " +
-			$"hasPlayer={playerObject.Components.Get<DeathrunPlayer>().IsValid()}, hasHealth={health.IsValid()}, hasSourceAir={sourceAir.IsValid()}, sourceAirEnabled={sourceAir.IsValid() && sourceAir.Enabled && sourceAir.EnableSourceAirMovement}, hasController={controller.IsValid()}, controllerEnabled={controller.IsValid() && controller.Enabled}, " +
+			$"hasPlayer={playerObject.Components.Get<DeathrunPlayer>().IsValid()}, hasHealth={health.IsValid()}, hasController={controller.IsValid()}, controllerEnabled={controller.IsValid() && controller.Enabled}, " +
 			$"input={controller.IsValid() && controller.UseInputControls}, look={controller.IsValid() && controller.UseLookControls}, camera={controller.IsValid() && controller.UseCameraControls}, " +
 			$"jumpSpeed={(controller.IsValid() ? controller.JumpSpeed : 0.0f):0.##}, grounded={controller.IsValid() && controller.IsOnGround}, shouldProcessLocalInput={controller.IsValid() && controller.ShouldProcessLocalInput()}, " +
 			$"legacyPresent={legacyController.IsValid()}, legacyEnabled={legacyController.IsValid() && legacyController.Enabled}, isDead={health.IsValid() && health.IsDead}, bodyValid={body.IsValid()}, motionEnabled={body.IsValid() && body.MotionEnabled}." );

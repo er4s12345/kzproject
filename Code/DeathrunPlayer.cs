@@ -254,7 +254,6 @@ public sealed class DeathrunPlayer : Component, Component.INetworkSpawn
 		var controller = Components.Get<DeathrunPlayerController>();
 		var legacyController = Components.Get<PlayerController>();
 		var health = Components.Get<DeathrunHealth>();
-		var sourceAir = Components.Get<DeathrunSourceAirMovement>();
 		var network = GameObject.Network;
 		var owner = network.Owner;
 		var ownerName = owner?.DisplayName ?? "none";
@@ -262,26 +261,15 @@ public sealed class DeathrunPlayer : Component, Component.INetworkSpawn
 		var localDebugTarget = ShouldLogLocalInputDebug();
 		var canReadInput = includeLocalInput && localDebugTarget;
 		var body = GetBestBody( controller );
-		var sourceJumpButton = sourceAir.IsValid() && !string.IsNullOrWhiteSpace( sourceAir.JumpButton )
-			? sourceAir.JumpButton
-			: "none";
 		var jumpPressed = canReadInput && Input.Pressed( "Jump" );
 		var jumpDown = canReadInput && Input.Down( "Jump" );
-		var sourceJumpPressed = jumpPressed;
-		var sourceJumpDown = jumpDown;
-
-		if ( canReadInput && sourceJumpButton != "none" && sourceJumpButton != "Jump" )
-		{
-			sourceJumpPressed = Input.Pressed( sourceJumpButton );
-			sourceJumpDown = Input.Down( sourceJumpButton );
-		}
 
 		Log.Info(
 			$"DeathrunPlayerInputDebug reason='{reason}', player='{GameObject.Name}', " +
 			$"NetworkActive={network.Active}, NetworkOwner={ownerName} ({ownerId}), OwnerId={network.OwnerId}, IsOwner={network.IsOwner}, IsProxy={network.IsProxy}, " +
 			$"ShouldProcessLocalInput={ShouldProcessLocalInput()}, OwnerDebugRpc={_ownerInputDebugEnabled}, LocalDebugTarget={localDebugTarget}, " +
 			$"DiagnosisCase='{ClassifyJumpDiagnostic( jumpPressed, jumpDown, controller, health, body )}', " +
-			$"InputJumpAction='Jump', SourceAirJumpButton='{sourceJumpButton}', JumpPressed={jumpPressed}, JumpDown={jumpDown}, SourceJumpPressed={sourceJumpPressed}, SourceJumpDown={sourceJumpDown}, AnalogMove={(canReadInput ? Input.AnalogMove : Vector3.Zero)}, " +
+			$"InputJumpAction='Jump', JumpPressed={jumpPressed}, JumpDown={jumpDown}, AnalogMove={(canReadInput ? Input.AnalogMove : Vector3.Zero)}, " +
 			$"{DescribeControllerDebug( controller )}, {DescribeBodyDebug( controller )}, {DescribeHealthDebug( health )}, {DescribeCameraDebug()}, " +
 			$"ControllerOnNetworkRoot={controller.IsValid() && controller.GameObject == GameObject}, LegacyPlayerControllerPresent={legacyController.IsValid()}, LegacyEnabled={legacyController.IsValid() && legacyController.Enabled}, RuntimeHierarchy={DescribeRuntimeHierarchy()}." );
 	}
