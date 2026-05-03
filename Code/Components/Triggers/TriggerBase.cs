@@ -8,7 +8,7 @@ namespace Sandbox.Components.Triggers
 	/**
 	 * Base class for triggers. It contains common logic like drawing gizmos, required components
 	 */
-	public abstract class  TriggerBase : Component
+	public abstract class  TriggerBase : Component, Component.ITriggerListener
 	{
 		[RequireComponent]
 		protected BoxCollider TriggerCollider { get; set; }
@@ -20,11 +20,11 @@ namespace Sandbox.Components.Triggers
 
 		[Property]
 		[Category( "Filter" )]
-		public bool TeleportPlayers = true;
+		public bool AllowPlayers = true;
 
 		[Property]
 		[Category( "Filter" )]
-		public bool TeleportPhysics = true;
+		public bool AllowPhysics = true;
 
 		[Property]
 		[Description( "If true, the trigger will be triggered only once and then destroyed. Otherwise, it can be triggered multiple times with a delay defined by RetriggerDelay." )]
@@ -36,7 +36,72 @@ namespace Sandbox.Components.Triggers
 		protected TimeSince LastTriggerTime = 999999999.0; // Set only after successful trigger, set to a very high value to allow triggering immediately after spawn
 
 
-		protected bool CanTrigger() { return LastTriggerTime > RetriggerDelay; }
+		[Property, Group( "Events" ), Doo.ArgumentHint<GameObject>( "GameObject which started to touch trigger" )]
+		public Doo OnStartTouch { get; set; }
+
+		[Property, Group( "Events" ), Doo.ArgumentHint<GameObject>("GameObject which stopped touching trigger")]
+		public Doo OnEndTouch { get; set; }
+
+		protected bool CanTrigger() { return LastTriggerTime >= RetriggerDelay; }
+
+		protected override void OnAwake()
+		{
+			TriggerCollider ??= Components.GetOrCreate<BoxCollider>();
+
+			if ( TriggerCollider.IsValid() )
+				TriggerCollider.IsTrigger = true;
+
+			GameObject.Tags.Add( "trigger" );
+			Tags.Add( "trigger" );
+		}
+
+		protected bool MatchesFilter( GameObject target )
+		{
+			if ( !target.IsValid() || !CanTrigger() )
+				return false;
+
+			var isPlayer = target.Components.GetInAncestorsOrSelf<PlayerController>().IsValid();
+			var isPhysics = target.Components.GetInAncestorsOrSelf<Rigidbody>().IsValid() && !isPlayer; // PlayerController also has rigidbody, so exclude objects with PlayerController from physics check
+
+			if ( TagFilter.Any() && !target.Tags.HasAny( TagFilter ) )
+				return false;
+
+			if ( isPlayer )
+				return AllowPlayers;
+
+			return AllowPhysics && isPhysics;
+		}
+
+		public virtual void OnTriggerEnter(GameObject Other)
+		{
+			if ( Networking.IsActive && !Networking.IsHost )
+				return;
+
+			if ( OnStartTouch is null || OnStartTouch.IsEmpty() )
+				return;
+
+			if (!CanTrigger() || !MatchesFilter(Other)) 
+				return;
+
+			Run(OnStartTouch, c => c.SetArgument("User", Other) );
+			LastTriggerTime = 0;
+		}
+
+		public virtual void OnTriggerExit(GameObject Other)
+		{
+
+			if ( Networking.IsActive && !Networking.IsHost )
+				return;
+
+			if ( OnEndTouch is null || OnEndTouch.IsEmpty() )
+				return;
+
+			if ( !CanTrigger() || !MatchesFilter(Other) )
+				return;
+
+			Run(OnEndTouch, c => c.SetArgument("User", Other) );
+			LastTriggerTime = 0;
+		}
 
 		protected override void DrawGizmos()
 		{
@@ -107,6 +172,15 @@ namespace Sandbox.Components.Triggers
 
 			return !trace.Hit;
 		}
+
+	}
+
+
+	// Just instanceable version of TriggerBase.
+	[EditorHandle(Icon = "touch_app" )]
+	[Category("Mapping"), Icon("touch_app")]
+	public class TriggerActivator : TriggerBase
+	{
 
 	}
 }
