@@ -30,12 +30,6 @@ public sealed class DeathrunHealth : Component
 	private Rigidbody _body;
 	private DeathrunRagdollOnDeath _ragdollOnDeath;
 	private DeathrunPlayer _deathrunPlayer;
-	private bool _storedUseInputControls;
-	private bool _storedUseLookControls;
-	private bool _storedUseCameraControls;
-	private bool _storedBodyMotionEnabled;
-	private bool _hasStoredInputState;
-	private bool _hasStoredBodyState;
 	private bool _respawnQueued;
 	private bool _respawnInProgress;
 	private int _respawnGeneration;
@@ -304,12 +298,19 @@ public sealed class DeathrunHealth : Component
 
 	private void FallbackRespawnMove()
 	{
-		WorldPosition = _initialSpawnPosition;
-		WorldRotation = _initialSpawnRotation;
-		ClearVelocity();
+		var respawnTransform = new Transform( _initialSpawnPosition, _initialSpawnRotation, 1.0f );
+		_playerController ??= Components.Get<DeathrunPlayerController>();
 
-		if ( GameObject.Network.Active )
-			GameObject.Network.ClearInterpolation();
+		if ( _playerController.IsValid() )
+			_playerController.ResetForRespawn( respawnTransform, "fallback respawn move" );
+		else
+		{
+			WorldTransform = respawnTransform;
+			ClearVelocity();
+
+			if ( GameObject.Network.Active )
+				GameObject.Network.ClearInterpolation();
+		}
 
 		Log.Warning( $"Fallback respawn moved '{GameObject.Name}' to its initial spawn position {_initialSpawnPosition}. TODO: replace this with checkpoint-aware respawn when checkpoints exist." );
 	}
@@ -328,63 +329,15 @@ public sealed class DeathrunHealth : Component
 
 		if ( _playerController.IsValid() )
 		{
-			if ( !enabled )
-			{
-				if ( !_hasStoredInputState )
-				{
-					_storedUseInputControls = _playerController.UseInputControls;
-					_storedUseLookControls = _playerController.UseLookControls;
-					_storedUseCameraControls = _playerController.UseCameraControls;
-					_hasStoredInputState = true;
-				}
+			_playerController.FreezeBodyWhenMovementDisabled = FreezeBodyOnDeath;
+			_playerController.SetMovementEnabled( enabled );
 
-				_playerController.UseInputControls = false;
-				_playerController.UseLookControls = false;
-				_playerController.UseCameraControls = false;
-			}
-			else
-			{
-				_playerController.Enabled = true;
-				_playerController.UseInputControls = _hasStoredInputState ? _storedUseInputControls : true;
-				_playerController.UseLookControls = _hasStoredInputState ? _storedUseLookControls : true;
-				_playerController.UseCameraControls = _hasStoredInputState ? _storedUseCameraControls : true;
-				_hasStoredInputState = false;
-
-				if ( LogDamage )
-					Log.Info( $"'{GameObject.Name}' DeathrunPlayerController input/camera restored. Input={_playerController.UseInputControls}, Look={_playerController.UseLookControls}, Camera={_playerController.UseCameraControls}." );
-			}
+			if ( LogDamage )
+				Log.Info( $"'{GameObject.Name}' DeathrunPlayerController movement {(enabled ? "enabled" : "disabled")}. Input={_playerController.UseInputControls}, Look={_playerController.UseLookControls}, Camera={_playerController.UseCameraControls}." );
 		}
 		else if ( !enabled )
 		{
 			Log.Warning( $"'{GameObject.Name}' has no DeathrunPlayerController to disable on death." );
-		}
-
-		_body = GetBody();
-
-		if ( _body.IsValid() )
-		{
-			if ( !enabled )
-			{
-				if ( !_hasStoredBodyState )
-				{
-					_storedBodyMotionEnabled = _body.MotionEnabled;
-					_hasStoredBodyState = true;
-				}
-
-				_body.Velocity = Vector3.Zero;
-
-				if ( FreezeBodyOnDeath )
-					_body.MotionEnabled = false;
-			}
-			else if ( _hasStoredBodyState )
-			{
-				_body.MotionEnabled = _storedBodyMotionEnabled;
-				_body.Velocity = Vector3.Zero;
-				_hasStoredBodyState = false;
-
-				if ( LogDamage )
-					Log.Info( $"'{GameObject.Name}' Rigidbody motion restored. MotionEnabled={_body.MotionEnabled}." );
-			}
 		}
 
 		if ( LogDamage )
@@ -415,6 +368,7 @@ public sealed class DeathrunHealth : Component
 		if ( _playerController.IsValid() )
 		{
 			_playerController.ClearVelocity();
+			_playerController.ClearBaseVelocity();
 			return;
 		}
 
@@ -518,12 +472,19 @@ public sealed class DeathrunHealth : Component
 		if ( !ShouldRunOwnerVisuals() )
 			return;
 
-		WorldPosition = respawnPosition;
-		WorldRotation = respawnRotation;
-		ClearVelocity();
+		_playerController ??= Components.Get<DeathrunPlayerController>();
 
-		if ( GameObject.Network.Active )
-			GameObject.Network.ClearInterpolation();
+		if ( _playerController.IsValid() )
+			_playerController.ResetForRespawn( new Transform( respawnPosition, respawnRotation, 1.0f ), "owner respawn visuals" );
+		else
+		{
+			WorldPosition = respawnPosition;
+			WorldRotation = respawnRotation;
+			ClearVelocity();
+
+			if ( GameObject.Network.Active )
+				GameObject.Network.ClearInterpolation();
+		}
 
 		var deathCamera = Components.Get<DeathrunOrbitDeathCamera>();
 
@@ -554,11 +515,12 @@ public sealed class DeathrunHealth : Component
 	private void RestoreSpawnControllerState( string reason )
 	{
 		CacheRuntimeComponents();
-		_hasStoredInputState = false;
-		_hasStoredBodyState = false;
 
 		if ( _playerController.IsValid() )
-			_playerController.InitializeSpawnState( reason );
+		{
+			_playerController.FreezeBodyWhenMovementDisabled = FreezeBodyOnDeath;
+			_playerController.ResetForRespawn( WorldTransform.WithScale( 1.0f ), reason );
+		}
 		else
 		{
 			Log.Warning( $"'{GameObject.Name}' has no DeathrunPlayerController during {reason}." );
@@ -566,13 +528,13 @@ public sealed class DeathrunHealth : Component
 
 		DisableLegacyPlayerController();
 
-		if ( _body.IsValid() )
+		if ( !_playerController.IsValid() && _body.IsValid() )
 		{
 			_body.Enabled = true;
 			_body.MotionEnabled = true;
 			_body.Velocity = Vector3.Zero;
 		}
-		else
+		else if ( !_playerController.IsValid() )
 		{
 			Log.Warning( $"'{GameObject.Name}' has no Rigidbody/body during {reason}." );
 		}

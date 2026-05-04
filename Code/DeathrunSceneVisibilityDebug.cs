@@ -9,7 +9,7 @@ public sealed class DeathrunSceneVisibilityDebug : Component
 {
 	private const string TestCubeName = "CLIENT_VISIBILITY_TEST_CUBE";
 
-	[Property] public bool LogVisibilityDebug { get; set; } = true;
+	[Property] public bool LogVisibilityDebug { get; set; } = false;
 	[Property] public float LogInterval { get; set; } = 2.0f;
 
 	private TimeSince _timeSinceLastLog;

@@ -14,7 +14,7 @@ public sealed class DeathrunRagdollOnDeath : Component
 	[Property] public bool CopyPlayerTransform { get; set; } = true;
 	[Property] public bool ApplyDeathForce { get; set; } = true;
 	[Property] public float DeathForceMultiplier { get; set; } = 1.0f;
-	[Property] public bool LogRagdoll { get; set; } = true;
+	[Property] public bool LogRagdoll { get; set; } = false;
 
 	public GameObject CurrentRagdoll => _currentRagdoll;
 

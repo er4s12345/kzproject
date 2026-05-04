@@ -9,13 +9,12 @@ public sealed class DeathrunSceneObjectCompareDebug : Component
 {
 	private static readonly string[] ObjectNames =
 	{
-		"CLIENT_VISIBILITY_TEST_CUBE",
 		"Scene Rotating Obstacle 0",
 		"Scene Rotating Obstacle 1",
 		"Scene Rotating Obstacle 2"
 	};
 
-	[Property] public bool LogCompareDebug { get; set; } = true;
+	[Property] public bool LogCompareDebug { get; set; } = false;
 	[Property] public float LogInterval { get; set; } = 2.0f;
 
 	private TimeSince _timeSinceLastLog;

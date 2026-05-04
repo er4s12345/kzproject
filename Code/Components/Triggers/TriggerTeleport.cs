@@ -98,13 +98,7 @@ namespace Sandbox.Components.Triggers
 
 			_teleportDestinationLocation = GetTeleportDestinationFor( target );
 
-			if ( ResetVelocity )
-				ClearVelocity( target );
-
-			target.WorldPosition = _teleportDestinationLocation;
-
-			if ( target.Network.Active )
-				target.Network.ClearInterpolation();
+			TeleportTarget( target, _teleportDestinationLocation );
 
 			LastTriggerTime = Time.Now;
 
@@ -166,6 +160,25 @@ namespace Sandbox.Components.Triggers
 			return other;
 		}
 
+		private void TeleportTarget( GameObject target, Vector3 destination )
+		{
+			var deathrunController = target.Components.GetInAncestorsOrSelf<global::DeathrunPlayerController>();
+
+			if ( deathrunController.IsValid() )
+			{
+				deathrunController.TeleportTo( destination, ResetVelocity, $"teleported by {GameObject.Name}" );
+				return;
+			}
+
+			if ( ResetVelocity )
+				ClearVelocity( target );
+
+			target.WorldPosition = destination;
+
+			if ( target.Network.Active )
+				target.Network.ClearInterpolation();
+		}
+
 		private static void ClearVelocity( GameObject target )
 		{
 			var deathrunController = target.Components.GetInAncestorsOrSelf<global::DeathrunPlayerController>();
@@ -173,6 +186,7 @@ namespace Sandbox.Components.Triggers
 			if ( deathrunController.IsValid() )
 			{
 				deathrunController.ClearVelocity();
+				deathrunController.ClearBaseVelocity();
 				return;
 			}
 

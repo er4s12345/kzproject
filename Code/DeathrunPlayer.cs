@@ -4,7 +4,7 @@
 public sealed class DeathrunPlayer : Component, Component.INetworkSpawn
 {
 	[Property] public bool LogPlayerLifecycle { get; set; } = false;
-	[Property] public bool LogLocalInputDebug { get; set; } = true;
+	[Property] public bool LogLocalInputDebug { get; set; } = false;
 	[Property] public float SpawnDebugDelay { get; set; } = 0.35f;
 	[Property] public float LocalInputSnapshotInterval { get; set; } = 1.0f;
 

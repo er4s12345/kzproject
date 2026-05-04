@@ -11,6 +11,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 	[Property] public bool DisableTemplateOnStart { get; set; } = true;
 	[Property] public Vector3 FallbackSpawnOffset { get; set; } = new( 0.0f, 0.0f, 80.0f );
 	[Property] public bool LogNetworking { get; set; } = false;
+	[Property] public bool EnableOwnerInputDebugOnSpawn { get; set; } = false;
 
 	private bool _templateDisabled;
 	private int _spawnIndex;
@@ -130,7 +131,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		playerObject.Components.GetOrCreate<DeathrunOrbitDeathCamera>();
 		playerObject.Components.GetOrCreate<DeathrunRagdollOnDeath>();
 		deathrunPlayer.Initialize( connection );
-		controller.InitializeSpawnState( "pre-network spawn" );
+		controller.ResetForRespawn( spawnTransform, "pre-network spawn" );
 
 		if ( health.IsValid() )
 			health.InitializeSpawnState();
@@ -152,7 +153,7 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 		if ( health.IsValid() )
 			health.InitializeSpawnOwnerRpc();
 
-		if ( deathrunPlayer.IsValid() )
+		if ( deathrunPlayer.IsValid() && EnableOwnerInputDebugOnSpawn )
 			deathrunPlayer.EnableLocalInputDebugOwnerRpc();
 
 		if ( !controller.IsValid() )
@@ -186,10 +187,17 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 		var respawnTransform = GetNextSpawnTransform();
 		var playerObject = player.GameObject;
+		var controller = playerObject.Components.Get<DeathrunPlayerController>();
 
 		playerObject.Enabled = true;
-		playerObject.WorldTransform = respawnTransform;
-		ClearPlayerVelocity( playerObject );
+
+		if ( controller.IsValid() )
+			controller.ResetForRespawn( respawnTransform, "network manager respawn" );
+		else
+		{
+			playerObject.WorldTransform = respawnTransform;
+			ClearPlayerVelocity( playerObject );
+		}
 
 		if ( playerObject.Network.Active )
 			playerObject.Network.ClearInterpolation();
@@ -375,7 +383,9 @@ public sealed class DeathrunNetworkManager : Component, Component.INetworkListen
 
 		if ( controller.IsValid() && controller.Body.IsValid() )
 		{
-			controller.InitializeSpawnState( "clear player velocity" );
+			controller.ClearVelocity();
+			controller.ClearBaseVelocity();
+			controller.SetMovementEnabled( true );
 			return;
 		}
 

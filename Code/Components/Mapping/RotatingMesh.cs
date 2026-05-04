@@ -172,7 +172,8 @@ namespace Sandbox.Components.Mapping
 			if ( HostAuthoritative && Networking.IsActive && IsNetworkActive() && GameObject.Network.IsProxy )
 				return;
 
-			Log.Info( $"RotatingMesh activated by {(Activator.IsValid() ? Activator.Name : "unknown")}" );
+			if ( LogNetworking )
+				Log.Info( $"RotatingMesh activated by {(Activator.IsValid() ? Activator.Name : "unknown")}" );
 
 			if ( GetUpdateMode() == RotatingMeshUpdateMode.DeterministicLocalMapFallback )
 			{
@@ -627,7 +628,9 @@ namespace Sandbox.Components.Mapping
 
 		protected void OnStateChanged( RotatingMeshState oldState, RotatingMeshState newState )
 		{
-			Log.Info( $"RotatingMesh state changed from {oldState} to {newState}" );
+			if ( LogNetworking )
+				Log.Info( $"RotatingMesh state changed from {oldState} to {newState}" );
+
 			PlayStateSound( newState );
 		}
 
@@ -670,7 +673,9 @@ namespace Sandbox.Components.Mapping
 			float t = RotationSpeed > 0 ? CurrentRotationSpeed / RotationSpeed : 0;
 			float pitch = float.Lerp( PitchRange.x, PitchRange.y, t );
 			_rotatingSoundHandle.Pitch = pitch;
-			Log.Info( $"Setting rotating sound pitch to {pitch} based on rotation speed {CurrentRotationSpeed}" );
+
+			if ( LogNetworking )
+				Log.Info( $"Setting rotating sound pitch to {pitch} based on rotation speed {CurrentRotationSpeed}" );
 		}
 
 		public string DescribeWorldObjectNetworking()
