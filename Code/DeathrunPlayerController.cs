@@ -33,7 +33,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Input" )] public float DuckedSpeed { get; set; } = 70.0f;
 	[Property, Group( "Input" )] public float JumpSpeed { get; set; } = 300.0f;
 	[Property, Group( "Input" )] public float DuckedHeight { get; set; } = 36.0f;
+	// Deprecated for physics movement. Kept for saved inspector compatibility; GroundAcceleration now controls acceleration.
 	[Property, Group( "Input" )] public float AccelerationTime { get; set; } = 0.0f;
+	// Deprecated for physics movement. GroundFriction and StopSpeed now control braking.
 	[Property, Group( "Input" )] public float DeaccelerationTime { get; set; } = 0.0f;
 	[Property, Group( "Input" ), InputAction] public string JumpButton { get; set; } = "Jump";
 	[Property, Group( "Input" ), InputAction] public string DuckButton { get; set; } = "Duck";
@@ -58,16 +60,23 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Movement" )] public float StepUpHeight { get; set; } = 18.0f;
 	[Property, Group( "Movement" )] public float StepDownHeight { get; set; } = 18.0f;
 	[Property, Group( "Movement" )] public float GroundFriction { get; set; } = 6.0f;
+	[Property, Group( "Movement" )] public float StopSpeed { get; set; } = 100.0f;
+	[Property, Group( "Movement" )] public float IdleVelocityEpsilon { get; set; } = 1.0f;
 	[Property, Group( "Movement" ), Range( 0, 1 )] public float BrakePower { get; set; } = 1.0f;
 	[Property, Group( "Movement" ), Range( 0, 1 )] public float AirFriction { get; set; } = 0.1f;
+	// Legacy selector retained for saved inspector values; air movement now always uses acceleration-based integration.
 	[Property, Group( "Movement" )] public DeathrunAirAccelerationMode AirAccelerationMode { get; set; } = DeathrunAirAccelerationMode.Source;
 	[Property, Group( "Movement" )] public float GroundAcceleration { get; set; } = 10.0f;
+	[Property, Group( "Movement" )] public float MaxGroundSpeed { get; set; } = 0.0f;
 	[Property, Group( "Movement" )] public float AirAcceleration { get; set; } = 12.0f;
 	[Property, Group( "Movement" )] public float AirControl { get; set; } = 0.35f;
 	[Property, Group( "Movement" )] public float MaxAirWishSpeed { get; set; } = 0.0f;
 	[Property, Group( "Movement" )] public float MaxAirVelocity { get; set; } = 900.0f;
 	[Property, Group( "Movement" )] public float StrafeMultiplier { get; set; } = 1.0f;
 	[Property, Group( "Movement" )] public bool PreserveAirMomentum { get; set; } = true;
+	[Property, Group( "Movement" )] public bool EnableBunnyhop { get; set; } = false;
+	[Property, Group( "Movement" )] public float AutoJumpWindow { get; set; } = 0.12f;
+	[Property, Group( "Movement" )] public bool BunnyhopPreserveFriction { get; set; } = true;
 	[Property, Group( "Movement" )] public bool EnableGroundTransformCarry { get; set; } = true;
 	[Property, Group( "Movement" )] public bool InheritGroundVelocityOnJump { get; set; } = true;
 	[Property, Group( "Movement" )] public float MaxGroundCarryDistance { get; set; } = 96.0f;
@@ -83,6 +92,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Animation" )] public float RotationAngleLimit { get; set; } = 45.0f;
 	[Property, Group( "Animation" )] public float RotationSpeed { get; set; } = 1.0f;
 	[Property, Group( "Debug" )] public bool LogControllerDebug { get; set; } = false;
+	[Property, Group( "Debug" )] public bool LogMovementDebug { get; set; } = false;
+	[Property, Group( "Debug" )] public bool LogAirControlDebug { get; set; } = false;
 	[Property, Group( "Debug" )] public bool StepDebug { get; set; } = false;
 
 	[Sync] public Vector3 WishVelocity { get; set; }
@@ -111,10 +122,14 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	private TimeSince _timeSinceJump;
 	private TimeSince _timeSinceDebugLog;
+	private TimeSince _timeSinceMovementDebug = 999.0f;
+	private TimeSince _timeSinceJumpPressed = 999.0f;
 	private TimeUntil _timeUntilAllowedGround;
 	private bool _isOnGround;
 	private bool _wasFalling;
 	private bool _jumpedSinceGrounded;
+	private bool _jumpQueued;
+	private bool _skipGroundFrictionThisTick;
 	private float _fallDistance;
 	private Vector3 _previousPosition;
 	private bool _didStep;
@@ -122,7 +137,6 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private Vector3 _baseVelocity;
 	private Vector3 _groundTransformVelocity;
 	private Vector3 _bodyDuckOffset;
-	private Vector3 _smoothedWishVelocity;
 	private float _cameraDistance = 100.0f;
 	private float _smoothedEyeZ;
 	private Transform _localGroundTransform;
@@ -227,6 +241,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 		ApplyGroundTransformDelta();
 		WishVelocity = BuildWishVelocity();
+		UpdateJumpQueue();
 		UpdateDucking( Input.Down( DuckButton ) );
 		TryJump();
 		UpdateEyeTransform();
@@ -303,10 +318,12 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		ClearGround();
 		_groundTransformVelocity = Vector3.Zero;
 		_jumpedSinceGrounded = false;
+		_jumpQueued = false;
+		_skipGroundFrictionThisTick = false;
 		_timeUntilAllowedGround = 0.0f;
 		_timeSinceJump = JumpCooldown;
+		_timeSinceJumpPressed = 999.0f;
 		_bodyDuckOffset = Vector3.Zero;
-		_smoothedWishVelocity = Vector3.Zero;
 		_hasStoredMovementState = false;
 		UseInputControls = true;
 		UseLookControls = true;
@@ -368,7 +385,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		UseLookControls = false;
 		UseCameraControls = false;
 		WishVelocity = Vector3.Zero;
-		_smoothedWishVelocity = Vector3.Zero;
+		_jumpQueued = false;
+		_skipGroundFrictionThisTick = false;
 		ClearBaseVelocity();
 		ClearGround();
 		StopPressing();
@@ -399,7 +417,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		WishVelocity = Vector3.Zero;
 		Velocity = Vector3.Zero;
 		GroundVelocity = Vector3.Zero;
-		_smoothedWishVelocity = Vector3.Zero;
+		_jumpQueued = false;
+		_skipGroundFrictionThisTick = false;
 		ClearBaseVelocity();
 
 		if ( Body.IsValid() )
@@ -425,7 +444,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		_timeUntilAllowedGround = 0.0f;
 		_jumpedSinceGrounded = false;
 		_groundTransformVelocity = Vector3.Zero;
-		_smoothedWishVelocity = Vector3.Zero;
+		_jumpQueued = false;
+		_skipGroundFrictionThisTick = false;
 		StopPressing();
 		SwitchHovered( null );
 		PreviousPositionReset();
@@ -622,13 +642,16 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	private bool WantsBodyBrakes()
 	{
-		return IsOnGround && WishVelocity.Length < 1.0f && GroundVelocity.Length < 1.0f;
+		return IsOnGround
+			&& WishVelocity.Length < 1.0f
+			&& Velocity.WithZ( 0.0f ).Length < IdleVelocityEpsilon
+			&& GroundVelocity.Length < 1.0f;
 	}
 
 	private bool WantsFeetBrakes()
 	{
 		if ( WishVelocity.Length < 5.0f )
-			return true;
+			return Velocity.WithZ( 0.0f ).Length < IdleVelocityEpsilon;
 
 		return WishVelocity.Length < Velocity.Length * 0.9f;
 	}
@@ -643,7 +666,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	private float GetEffectiveGroundFriction()
 	{
-		return MathF.Max( CurrentGroundFriction > 0.0f ? CurrentGroundFriction : GroundFriction, 0.0f );
+		return MathF.Max( CurrentGroundFriction, 0.0f );
 	}
 
 	private void UpdateVelocity()
@@ -771,8 +794,6 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 		if ( direction.IsNearlyZero( 0.1f ) )
 			direction = Vector3.Zero;
-		else if ( _smoothedWishVelocity.Length > 0.0f )
-			_smoothedWishVelocity = direction.Normal * _smoothedWishVelocity.Length;
 
 		var run = Input.Down( AltMoveButton );
 
@@ -784,22 +805,13 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( IsDucking )
 			speed = DuckedSpeed;
 
-		var target = direction * speed;
-		var smoothTime = target.Length < _smoothedWishVelocity.Length ? DeaccelerationTime : AccelerationTime;
+		if ( IsOnGround && MaxGroundSpeed > 0.0f )
+			speed = MathF.Min( speed, MaxGroundSpeed );
 
-		if ( smoothTime <= 0.0f || Time.Delta <= 0.0f )
-		{
-			_smoothedWishVelocity = target;
-			return target;
-		}
+		if ( direction.IsNearlyZero( 0.01f ) )
+			return Vector3.Zero;
 
-		var fraction = MathF.Min( Time.Delta / smoothTime, 1.0f );
-		_smoothedWishVelocity = Vector3.Lerp( _smoothedWishVelocity, target, fraction );
-
-		if ( _smoothedWishVelocity.IsNearlyZero( 0.01f ) )
-			_smoothedWishVelocity = Vector3.Zero;
-
-		return _smoothedWishVelocity;
+		return direction.Normal * speed * direction.Length.Clamp( 0.0f, 1.0f );
 	}
 
 	private void AddMovementVelocity()
@@ -812,73 +824,73 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		var supportVelocity = GroundVelocity + baseVelocity;
 		var originalZ = Body.Velocity.z;
 		var relativeVelocity = Body.Velocity - supportVelocity;
+		var horizontalBefore = relativeVelocity.WithZ( 0.0f );
+		var horizontal = horizontalBefore;
+		var wishDirection = wish.IsNearlyZero( 0.01f ) ? Vector3.Zero : wish.Normal;
+		var wishSpeed = IsOnGround ? GetGroundWishSpeed( wish ) : GetAirWishSpeed( wish );
+		var currentSpeed = 0.0f;
+		var addSpeed = 0.0f;
+		var accelSpeed = 0.0f;
+		var frictionDrop = 0.0f;
+		var airControlAmount = 0.0f;
+		var skippedFriction = false;
 
 		if ( IsOnGround )
 		{
-			relativeVelocity = AddFacepunchGroundVelocity( relativeVelocity, wish );
-			relativeVelocity = relativeVelocity.WithZ( originalZ - supportVelocity.z );
+			skippedFriction = _skipGroundFrictionThisTick && EnableBunnyhop && BunnyhopPreserveFriction;
+			horizontal = ApplyGroundFriction( horizontal, Time.Delta, skippedFriction, out frictionDrop );
+			horizontal = Accelerate( horizontal, wishDirection, wishSpeed, GroundAcceleration, Time.Delta, out currentSpeed, out addSpeed, out accelSpeed );
+			relativeVelocity = horizontal.WithZ( originalZ - supportVelocity.z );
+			LogMovementStep( "ground", horizontalBefore, horizontal, wishDirection, wishSpeed, currentSpeed, addSpeed, accelSpeed, frictionDrop, airControlAmount, skippedFriction );
 		}
 		else
 		{
-			relativeVelocity = AirAccelerationMode == DeathrunAirAccelerationMode.Source
-				? AddSourceAirVelocity( relativeVelocity, wish )
-				: AddFacepunchAirVelocity( relativeVelocity, wish );
+			horizontal = Accelerate( horizontal, wishDirection, wishSpeed, AirAcceleration, Time.Delta, out currentSpeed, out addSpeed, out accelSpeed );
+			horizontal = ApplyAirControl( horizontal, wishDirection, Time.Delta, out airControlAmount );
+
+			if ( MaxAirVelocity > 0.0f && horizontal.Length > MaxAirVelocity )
+				horizontal = horizontal.Normal * MaxAirVelocity;
+
+			relativeVelocity = horizontal.WithZ( relativeVelocity.z );
+			LogMovementStep( "air", horizontalBefore, horizontal, wishDirection, wishSpeed, currentSpeed, addSpeed, accelSpeed, frictionDrop, airControlAmount, _skipGroundFrictionThisTick );
 		}
 
 		Body.Velocity = relativeVelocity + supportVelocity;
 		_baseVelocity = Vector3.Zero;
+		_skipGroundFrictionThisTick = false;
 		Body.Sleeping = false;
 	}
 
-	private Vector3 AddFacepunchGroundVelocity( Vector3 velocity, Vector3 wish )
+	private float GetGroundWishSpeed( Vector3 wish )
 	{
-		if ( wish.IsNearlyZero( 0.01f ) )
+		var wishSpeed = wish.Length;
+
+		if ( MaxGroundSpeed > 0.0f )
+			wishSpeed = MathF.Min( wishSpeed, MaxGroundSpeed );
+
+		return wishSpeed;
+	}
+
+	private Vector3 ApplyGroundFriction( Vector3 velocity, float deltaTime, bool skipFriction, out float frictionDrop )
+	{
+		frictionDrop = 0.0f;
+
+		if ( skipFriction || deltaTime <= 0.0f )
 			return velocity;
 
 		var speed = velocity.Length;
-		var maxSpeed = MathF.Max( wish.Length, speed );
-		var amount = 0.25f + GetEffectiveGroundFriction() * MathF.Max( GroundAcceleration, 0.0f );
 
-		velocity = AddClampedDirection( velocity, wish * amount, wish.Length * amount );
+		if ( speed < IdleVelocityEpsilon )
+			return Vector3.Zero;
 
-		if ( velocity.Length > maxSpeed )
-			velocity = velocity.Normal * maxSpeed;
+		var control = MathF.Max( speed, MathF.Max( StopSpeed, 0.0f ) );
+		frictionDrop = control * GetEffectiveGroundFriction() * deltaTime;
+		var newSpeed = MathF.Max( speed - frictionDrop, 0.0f );
 
-		return velocity;
-	}
+		if ( newSpeed < IdleVelocityEpsilon )
+			return Vector3.Zero;
 
-	private Vector3 AddFacepunchAirVelocity( Vector3 velocity, Vector3 wish )
-	{
-		if ( wish.IsNearlyZero( 0.01f ) )
-			return velocity;
-
-		var wishSpeed = GetAirWishSpeed( wish );
-		var wishVelocity = wish.Normal * wishSpeed;
-		var speed = velocity.Length;
-		var maxSpeed = MathF.Max( wishSpeed, speed );
-
-		velocity = AddClampedDirection( velocity, wishVelocity * 0.05f, wishSpeed );
-
-		if ( velocity.Length > maxSpeed )
-			velocity = velocity.Normal * maxSpeed;
-
-		return velocity;
-	}
-
-	private Vector3 AddSourceAirVelocity( Vector3 velocity, Vector3 wish )
-	{
-		if ( wish.IsNearlyZero( 0.01f ) )
-			return velocity;
-
-		var wishDirection = wish.Normal;
-		var wishSpeed = GetAirWishSpeed( wish );
-		var horizontal = Accelerate( velocity.WithZ( 0.0f ), wishDirection, wishSpeed, AirAcceleration, Time.Delta );
-		horizontal = ApplyAirControl( horizontal, wishDirection, Time.Delta );
-
-		if ( MaxAirVelocity > 0.0f && horizontal.Length > MaxAirVelocity )
-			horizontal = horizontal.Normal * MaxAirVelocity;
-
-		return horizontal.WithZ( velocity.z );
+		return velocity * (newSpeed / speed);
 	}
 
 	private float GetAirWishSpeed( Vector3 wish )
@@ -891,8 +903,10 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		return wishSpeed;
 	}
 
-	private Vector3 ApplyAirControl( Vector3 velocity, Vector3 wishDirection, float deltaTime )
+	private Vector3 ApplyAirControl( Vector3 velocity, Vector3 wishDirection, float deltaTime, out float controlAmount )
 	{
+		controlAmount = 0.0f;
+
 		if ( AirControl <= 0.0f || deltaTime <= 0.0f || wishDirection.LengthSquared <= 0.0001f )
 			return velocity;
 
@@ -901,25 +915,45 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( speed <= 0.01f )
 			return velocity;
 
-		var control = MathF.Min( AirControl * deltaTime * 8.0f, 1.0f );
+		var dot = Vector3.Dot( velocity.Normal, wishDirection );
+
+		if ( dot <= 0.0f )
+			return velocity;
+
+		controlAmount = MathF.Min( AirControl * dot * dot * deltaTime, 1.0f );
+
+		if ( controlAmount <= 0.0f )
+			return velocity;
 
 		return PreserveAirMomentum
-			? (velocity.Normal + wishDirection * control).Normal * speed
-			: velocity + (wishDirection * speed - velocity) * control;
+			? (velocity.Normal * (1.0f - controlAmount) + wishDirection * controlAmount).Normal * speed
+			: velocity + (wishDirection * speed - velocity) * controlAmount;
 	}
 
-	private static Vector3 Accelerate( Vector3 currentVelocity, Vector3 wishDirection, float wishSpeed, float acceleration, float deltaTime )
+	private static Vector3 Accelerate(
+		Vector3 currentVelocity,
+		Vector3 wishDirection,
+		float wishSpeed,
+		float acceleration,
+		float deltaTime,
+		out float currentSpeed,
+		out float addSpeed,
+		out float accelSpeed )
 	{
+		currentSpeed = 0.0f;
+		addSpeed = 0.0f;
+		accelSpeed = 0.0f;
+
 		if ( wishSpeed <= 0.0f || acceleration <= 0.0f || deltaTime <= 0.0f || wishDirection.LengthSquared <= 0.0001f )
 			return currentVelocity;
 
-		var currentSpeed = Vector3.Dot( currentVelocity, wishDirection );
-		var addSpeed = wishSpeed - currentSpeed;
+		currentSpeed = Vector3.Dot( currentVelocity, wishDirection );
+		addSpeed = wishSpeed - currentSpeed;
 
 		if ( addSpeed <= 0.0f )
 			return currentVelocity;
 
-		var accelSpeed = MathF.Min( acceleration * wishSpeed * deltaTime, addSpeed );
+		accelSpeed = MathF.Min( acceleration * wishSpeed * deltaTime, addSpeed );
 		return currentVelocity + wishDirection * accelSpeed;
 	}
 
@@ -938,12 +972,43 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		return currentVelocity + direction * addSpeed;
 	}
 
+	private void UpdateJumpQueue()
+	{
+		if ( string.IsNullOrWhiteSpace( JumpButton ) )
+		{
+			_jumpQueued = false;
+			return;
+		}
+
+		if ( Input.Pressed( JumpButton ) )
+		{
+			_timeSinceJumpPressed = 0.0f;
+			_jumpQueued = EnableBunnyhop;
+		}
+
+		if ( EnableBunnyhop && Input.Down( JumpButton ) )
+		{
+			_jumpQueued = true;
+			return;
+		}
+
+		if ( _timeSinceJumpPressed > MathF.Max( AutoJumpWindow, 0.0f ) )
+			_jumpQueued = false;
+	}
+
 	private void TryJump()
 	{
 		if ( JumpSpeed <= 0.0f )
 			return;
 
-		if ( !Input.Pressed( JumpButton ) )
+		if ( string.IsNullOrWhiteSpace( JumpButton ) )
+			return;
+
+		var jumpPressed = Input.Pressed( JumpButton );
+		var jumpHeld = Input.Down( JumpButton );
+		var jumpQueued = EnableBunnyhop && (_jumpQueued || jumpHeld || _timeSinceJumpPressed <= MathF.Max( AutoJumpWindow, 0.0f ));
+
+		if ( !jumpPressed && !jumpQueued )
 			return;
 
 		if ( _timeSinceJump < JumpCooldown )
@@ -955,11 +1020,43 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( TimeSinceGrounded > CoyoteTime )
 			return;
 
+		_skipGroundFrictionThisTick = EnableBunnyhop && BunnyhopPreserveFriction && IsOnGround;
 		_timeSinceJump = 0.0f;
+		_timeSinceJumpPressed = 999.0f;
+		_jumpQueued = false;
 		Jump( Vector3.Up * JumpSpeed );
 		_jumpedSinceGrounded = true;
 		Renderer?.Set( "b_jump", true );
 		IEvents.PostToGameObject( GameObject, x => x.OnJumped() );
+	}
+
+	private void LogMovementStep(
+		string phase,
+		Vector3 before,
+		Vector3 after,
+		Vector3 wishDirection,
+		float wishSpeed,
+		float currentSpeed,
+		float addSpeed,
+		float accelSpeed,
+		float frictionDrop,
+		float airControlAmount,
+		bool skippedFriction )
+	{
+		if ( !LogMovementDebug && !(phase == "air" && LogAirControlDebug) )
+			return;
+
+		if ( _timeSinceMovementDebug < 0.2f )
+			return;
+
+		_timeSinceMovementDebug = 0.0f;
+		var hasJumpButton = !string.IsNullOrWhiteSpace( JumpButton );
+
+		Log.Info(
+			$"DeathrunMovement '{GameObject.Name}' phase={phase}, grounded={IsOnGround}, before={before}, finalHorizontal={after}, " +
+			$"wishDir={wishDirection}, wishSpeed={wishSpeed:0.###}, currentAlongWish={currentSpeed:0.###}, addSpeed={addSpeed:0.###}, accelSpeed={accelSpeed:0.###}, " +
+			$"frictionDrop={frictionDrop:0.###}, airControl={airControlAmount:0.###}, jumpPressed={hasJumpButton && Input.Pressed( JumpButton )}, jumpHeld={hasJumpButton && Input.Down( JumpButton )}, " +
+			$"jumpQueued={_jumpQueued}, skipFriction={skippedFriction}" );
 	}
 
 	public void UpdateDucking( bool wantsDuck )
