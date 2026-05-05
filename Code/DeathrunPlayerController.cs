@@ -48,8 +48,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Input" )] public float LookSensitivity { get; set; } = 1.0f;
 	[Property, Group( "Input" )] public bool RotateWithGround { get; set; } = true;
 	[Property, Group( "Input" ), Range( 0, 180 )] public float PitchClamp { get; set; } = 90.0f;
-	[Property, Group( "Input" )] public float JumpCooldown { get; set; } = 0.1f;
-	[Property, Group( "Input" )] public float CoyoteTime { get; set; } = 0.2f;
+	[Property, Group( "Input" )] public float JumpCooldown { get; set; } = 0.0f;
+	[Property, Group( "Input" )] public float CoyoteTime { get; set; } = 0.0f;
 
 	[Property, Group( "Body" ), Range( 1, 64 )] public float BodyRadius { get; set; } = 16.0f;
 	[Property, Group( "Body" ), Range( 1, 128 )] public float BodyHeight { get; set; } = 72.0f;
@@ -72,10 +72,10 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Movement" )] public float AirAcceleration { get; set; } = 10.0f;
 	[Property, Group( "Movement" )] public float AirControl { get; set; } = 0.0f;
 	[Property, Group( "Movement" )] public float MaxAirWishSpeed { get; set; } = 30.0f;
-	[Property, Group( "Movement" )] public float MaxAirVelocity { get; set; } = 900.0f;
+	[Property, Group( "Movement" )] public float MaxAirVelocity { get; set; } = 0.0f;
 	[Property, Group( "Movement" )] public float StrafeMultiplier { get; set; } = 1.0f;
 	[Property, Group( "Movement" )] public bool PreserveAirMomentum { get; set; } = true;
-	[Property, Group( "Movement" )] public bool EnableBunnyhop { get; set; } = false;
+	[Property, Group( "Movement" )] public bool EnableBunnyhop { get; set; } = true;
 	[Property, Group( "Movement" )] public float AutoJumpWindow { get; set; } = 0.12f;
 	[Property, Group( "Movement" )] public bool SkipGroundFrictionOnBunnyhop { get; set; } = true;
 	// Legacy inspector name. SkipGroundFrictionOnBunnyhop is the authoritative bhop friction switch.
@@ -134,6 +134,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private bool _wasFalling;
 	private bool _jumpedSinceGrounded;
 	private bool _jumpQueued;
+	private bool _jumpConsumedThisTick;
 	private bool _skipGroundFrictionThisTick;
 	private bool _hasBunnyhopAuditSpeed;
 	private int _bunnyhopAuditFrame;
@@ -253,8 +254,14 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		}
 
 		ApplyGroundTransformDelta();
+		UpdateVelocity();
+		CategorizeGround();
+		UpdateGroundVelocity();
+		AuditBunnyhopSpeed( "2 After ground check", Body.Velocity );
+
 		WishVelocity = BuildWishVelocity();
 		UpdateJumpQueue();
+		_jumpConsumedThisTick = false;
 		UpdateDucking( Input.Down( DuckButton ) );
 		TryJump();
 		UpdateEyeTransform();
@@ -284,7 +291,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		RestoreStep();
 		Reground( StepDownHeight );
 		CategorizeGround();
-		AuditBunnyhopSpeed( "2 After ground check", Body.Velocity );
+		AuditBunnyhopSpeed( "Post-physics ground check", Body.Velocity );
 		StoreGroundTransform();
 		UpdateBodySetup();
 		UpdateVelocity();
@@ -333,6 +340,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		_groundTransformVelocity = Vector3.Zero;
 		_jumpedSinceGrounded = false;
 		_jumpQueued = false;
+		_jumpConsumedThisTick = false;
 		_skipGroundFrictionThisTick = false;
 		_timeUntilAllowedGround = 0.0f;
 		_timeSinceJump = JumpCooldown;
@@ -400,6 +408,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		UseCameraControls = false;
 		WishVelocity = Vector3.Zero;
 		_jumpQueued = false;
+		_jumpConsumedThisTick = false;
 		_skipGroundFrictionThisTick = false;
 		ClearBaseVelocity();
 		ClearGround();
@@ -432,6 +441,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		Velocity = Vector3.Zero;
 		GroundVelocity = Vector3.Zero;
 		_jumpQueued = false;
+		_jumpConsumedThisTick = false;
 		_skipGroundFrictionThisTick = false;
 		ClearBaseVelocity();
 
@@ -459,6 +469,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		_jumpedSinceGrounded = false;
 		_groundTransformVelocity = Vector3.Zero;
 		_jumpQueued = false;
+		_jumpConsumedThisTick = false;
 		_skipGroundFrictionThisTick = false;
 		StopPressing();
 		SwitchHovered( null );
@@ -864,6 +875,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		}
 		else
 		{
+			AuditBunnyhopSpeed( "3 Before friction", horizontal, "not grounded; friction not run" );
+			AuditBunnyhopSpeed( "4 After friction", horizontal, "not grounded; friction not run" );
 			wishSpeedCap = GetAirWishSpeedCap( wishSpeed );
 			horizontal = Accelerate( horizontal, wishDirection, wishSpeedCap, wishSpeed, AirAcceleration, Time.Delta, 1.0f, out currentSpeed, out addSpeed, out accelSpeed );
 			AuditBunnyhopSpeed( "7 After ground/air acceleration", horizontal, $"mode=air, wishSpeedCap={wishSpeedCap:0.###}, currentAlongWish={currentSpeed:0.###}, addSpeed={addSpeed:0.###}, accelSpeed={accelSpeed:0.###}" );
@@ -1067,6 +1080,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		_timeSinceJumpPressed = 999.0f;
 		_jumpQueued = false;
 		Jump( Vector3.Up * JumpSpeed );
+		_jumpConsumedThisTick = true;
 		AuditBunnyhopSpeed( "6 After jump", Body.IsValid() ? Body.Velocity : Vector3.Zero, $"skipFrictionFlag={_skipGroundFrictionThisTick}" );
 		_jumpedSinceGrounded = true;
 		Renderer?.Set( "b_jump", true );
@@ -1134,7 +1148,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		Log.Info(
 			$"BunnyhopSpeedAudit '{GameObject.Name}' frame={_bunnyhopAuditFrame}, point='{point}', horizontalSpeed={speed:0.###}, velocity={velocity}, " +
 			$"grounded={IsOnGround}, jumpPressed={hasJumpButton && Input.Pressed( JumpButton )}, jumpHeld={hasJumpButton && Input.Down( JumpButton )}, jumpQueued={_jumpQueued}, " +
-			$"skipGroundFrictionFlag={_skipGroundFrictionThisTick}, source={source}{extra}" );
+			$"jumpConsumed={_jumpConsumedThisTick}, skipGroundFrictionFlag={_skipGroundFrictionThisTick}, source={source}{extra}" );
 
 		if ( _hasBunnyhopAuditSpeed )
 		{
@@ -1392,8 +1406,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			_didStep = true;
 			_stepPosition = trace.EndPosition + Vector3.Up * Skin;
 			Body.WorldPosition = _stepPosition;
-			Body.Velocity = Body.Velocity.WithZ( 0.0f ) * 0.9f;
-			AuditBunnyhopSpeed( "Step movement velocity scale", Body.Velocity, "TryStep applied 0.9 horizontal scale" );
+			Body.Velocity = Body.Velocity.WithZ( 0.0f );
+			AuditBunnyhopSpeed( "Step movement vertical clear", Body.Velocity, "TryStep preserved horizontal speed" );
 
 			if ( StepDebug )
 				DebugOverlay.Line( top, _stepPosition, duration: 10.0f, color: Color.Green );
