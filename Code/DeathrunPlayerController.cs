@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 
 public enum DeathrunAirAccelerationMode
 {
@@ -76,6 +77,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Movement" )] public bool PreserveAirMomentum { get; set; } = true;
 	[Property, Group( "Movement" )] public bool EnableBunnyhop { get; set; } = false;
 	[Property, Group( "Movement" )] public float AutoJumpWindow { get; set; } = 0.12f;
+	[Property, Group( "Movement" )] public bool SkipGroundFrictionOnBunnyhop { get; set; } = true;
+	// Legacy inspector name. SkipGroundFrictionOnBunnyhop is the authoritative bhop friction switch.
 	[Property, Group( "Movement" )] public bool BunnyhopPreserveFriction { get; set; } = true;
 	[Property, Group( "Movement" )] public bool EnableGroundTransformCarry { get; set; } = true;
 	[Property, Group( "Movement" )] public bool InheritGroundVelocityOnJump { get; set; } = true;
@@ -94,6 +97,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Debug" )] public bool LogControllerDebug { get; set; } = false;
 	[Property, Group( "Debug" )] public bool LogMovementDebug { get; set; } = false;
 	[Property, Group( "Debug" )] public bool LogAirControlDebug { get; set; } = false;
+	[Property, Group( "Debug" )] public bool LogBunnyhopDebug { get; set; } = false;
+	[Property, Group( "Debug" )] public float BunnyhopDebugSpeedDropThreshold { get; set; } = 20.0f;
 	[Property, Group( "Debug" )] public bool StepDebug { get; set; } = false;
 
 	[Sync] public Vector3 WishVelocity { get; set; }
@@ -130,6 +135,11 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private bool _jumpedSinceGrounded;
 	private bool _jumpQueued;
 	private bool _skipGroundFrictionThisTick;
+	private bool _hasBunnyhopAuditSpeed;
+	private int _bunnyhopAuditFrame;
+	private float _lastBunnyhopAuditSpeed;
+	private string _lastBunnyhopAuditPoint;
+	private string _lastBunnyhopAuditSource;
 	private float _fallDistance;
 	private Vector3 _previousPosition;
 	private bool _didStep;
@@ -229,6 +239,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( Scene.IsEditor )
 			return;
 
+		BeginBunnyhopSpeedAudit();
+		AuditBunnyhopSpeed( "1 Start of fixed update", Body.IsValid() ? Body.Velocity : Vector3.Zero );
+
 		UpdateHeadroom();
 		UpdateFalling();
 		_previousPosition = WorldPosition;
@@ -271,6 +284,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		RestoreStep();
 		Reground( StepDownHeight );
 		CategorizeGround();
+		AuditBunnyhopSpeed( "2 After ground check", Body.Velocity );
 		StoreGroundTransform();
 		UpdateBodySetup();
 		UpdateVelocity();
@@ -838,26 +852,33 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 		if ( IsOnGround )
 		{
-			skippedFriction = _skipGroundFrictionThisTick && EnableBunnyhop && BunnyhopPreserveFriction;
+			skippedFriction = _skipGroundFrictionThisTick && ShouldSkipGroundFrictionOnBunnyhop();
+			AuditBunnyhopSpeed( "3 Before friction", horizontal, $"bodyHorizontal={GetHorizontalSpeed( Body.Velocity ):0.###}, skipFriction={skippedFriction}" );
 			horizontal = ApplyGroundFriction( horizontal, Time.Delta, skippedFriction, out frictionDrop );
+			AuditBunnyhopSpeed( "4 After friction", horizontal, $"frictionDrop={frictionDrop:0.###}, skipped={skippedFriction}" );
 			horizontal = Accelerate( horizontal, wishDirection, wishSpeed, wishSpeed, GroundAcceleration, Time.Delta, GetSurfaceFrictionScale(), out currentSpeed, out addSpeed, out accelSpeed );
+			AuditBunnyhopSpeed( "7 After ground/air acceleration", horizontal, $"mode=ground, currentAlongWish={currentSpeed:0.###}, addSpeed={addSpeed:0.###}, accelSpeed={accelSpeed:0.###}" );
 			relativeVelocity = horizontal.WithZ( originalZ - supportVelocity.z );
+			AuditBunnyhopSpeed( "8 After any speed clamp", horizontal, "mode=ground, clamp=none" );
 			LogMovementStep( "ground", horizontalBefore, horizontal, wishDirection, wishSpeed, wishSpeedCap, currentSpeed, addSpeed, accelSpeed, frictionDrop, airControlAmount, skippedFriction, baseVelocity );
 		}
 		else
 		{
 			wishSpeedCap = GetAirWishSpeedCap( wishSpeed );
 			horizontal = Accelerate( horizontal, wishDirection, wishSpeedCap, wishSpeed, AirAcceleration, Time.Delta, 1.0f, out currentSpeed, out addSpeed, out accelSpeed );
+			AuditBunnyhopSpeed( "7 After ground/air acceleration", horizontal, $"mode=air, wishSpeedCap={wishSpeedCap:0.###}, currentAlongWish={currentSpeed:0.###}, addSpeed={addSpeed:0.###}, accelSpeed={accelSpeed:0.###}" );
 			horizontal = ApplyAirControl( horizontal, wishDirection, Time.Delta, out airControlAmount );
 
 			if ( MaxAirVelocity > 0.0f && horizontal.Length > MaxAirVelocity )
 				horizontal = horizontal.Normal * MaxAirVelocity;
 
+			AuditBunnyhopSpeed( "8 After any speed clamp", horizontal, $"mode=air, maxAirVelocity={MaxAirVelocity:0.###}, airControl={airControlAmount:0.###}" );
 			relativeVelocity = horizontal.WithZ( relativeVelocity.z );
 			LogMovementStep( "air", horizontalBefore, horizontal, wishDirection, wishSpeed, wishSpeedCap, currentSpeed, addSpeed, accelSpeed, frictionDrop, airControlAmount, _skipGroundFrictionThisTick, baseVelocity );
 		}
 
 		Body.Velocity = relativeVelocity + supportVelocity + baseVelocity;
+		AuditBunnyhopSpeed( "9 Final velocity written to body", Body.Velocity, $"supportVelocity={supportVelocity}, baseVelocity={baseVelocity}" );
 		_baseVelocity = Vector3.Zero;
 		_skipGroundFrictionThisTick = false;
 		Body.Sleeping = false;
@@ -914,6 +935,11 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			return 1.0f;
 
 		return MathF.Max( CurrentGroundFriction / GroundFriction, 0.0f );
+	}
+
+	private bool ShouldSkipGroundFrictionOnBunnyhop()
+	{
+		return EnableBunnyhop && SkipGroundFrictionOnBunnyhop;
 	}
 
 	private Vector3 ApplyAirControl( Vector3 velocity, Vector3 wishDirection, float deltaTime, out float controlAmount )
@@ -1035,11 +1061,13 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( TimeSinceGrounded > CoyoteTime )
 			return;
 
-		_skipGroundFrictionThisTick = EnableBunnyhop && BunnyhopPreserveFriction && IsOnGround;
+		AuditBunnyhopSpeed( "5 Before jump", Body.IsValid() ? Body.Velocity : Vector3.Zero, $"jumpPressed={jumpPressed}, jumpHeld={jumpHeld}, jumpQueued={jumpQueued}" );
+		_skipGroundFrictionThisTick = ShouldSkipGroundFrictionOnBunnyhop() && IsOnGround;
 		_timeSinceJump = 0.0f;
 		_timeSinceJumpPressed = 999.0f;
 		_jumpQueued = false;
 		Jump( Vector3.Up * JumpSpeed );
+		AuditBunnyhopSpeed( "6 After jump", Body.IsValid() ? Body.Velocity : Vector3.Zero, $"skipFrictionFlag={_skipGroundFrictionThisTick}" );
 		_jumpedSinceGrounded = true;
 		Renderer?.Set( "b_jump", true );
 		IEvents.PostToGameObject( GameObject, x => x.OnJumped() );
@@ -1074,6 +1102,66 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			$"wishDir={wishDirection}, wishSpeed={wishSpeed:0.###}, wishSpeedCap={wishSpeedCap:0.###}, currentAlongWish={currentSpeed:0.###}, addSpeed={addSpeed:0.###}, accelSpeed={accelSpeed:0.###}, " +
 			$"frictionDrop={frictionDrop:0.###}, airControl={airControlAmount:0.###}, jumpPressed={hasJumpButton && Input.Pressed( JumpButton )}, jumpHeld={hasJumpButton && Input.Down( JumpButton )}, " +
 			$"jumpQueued={_jumpQueued}, skipFriction={skippedFriction}, baseVelocity={baseVelocity}" );
+	}
+
+	private void BeginBunnyhopSpeedAudit()
+	{
+		if ( !ShouldLogBunnyhopDebug() )
+			return;
+
+		_bunnyhopAuditFrame++;
+		_hasBunnyhopAuditSpeed = false;
+		_lastBunnyhopAuditSpeed = 0.0f;
+		_lastBunnyhopAuditPoint = null;
+		_lastBunnyhopAuditSource = null;
+	}
+
+	private void AuditBunnyhopSpeed(
+		string point,
+		Vector3 velocity,
+		string details = null,
+		[CallerMemberName] string member = "",
+		[CallerLineNumber] int line = 0 )
+	{
+		if ( !ShouldLogBunnyhopDebug() )
+			return;
+
+		var speed = GetHorizontalSpeed( velocity );
+		var source = $"{member}:{line}";
+		var hasJumpButton = !string.IsNullOrWhiteSpace( JumpButton );
+		var extra = string.IsNullOrWhiteSpace( details ) ? string.Empty : $", {details}";
+
+		Log.Info(
+			$"BunnyhopSpeedAudit '{GameObject.Name}' frame={_bunnyhopAuditFrame}, point='{point}', horizontalSpeed={speed:0.###}, velocity={velocity}, " +
+			$"grounded={IsOnGround}, jumpPressed={hasJumpButton && Input.Pressed( JumpButton )}, jumpHeld={hasJumpButton && Input.Down( JumpButton )}, jumpQueued={_jumpQueued}, " +
+			$"skipGroundFrictionFlag={_skipGroundFrictionThisTick}, source={source}{extra}" );
+
+		if ( _hasBunnyhopAuditSpeed )
+		{
+			var drop = _lastBunnyhopAuditSpeed - speed;
+
+			if ( drop >= MathF.Max( BunnyhopDebugSpeedDropThreshold, 0.0f ) )
+			{
+				Log.Info(
+					$"BunnyhopSpeedAudit DROP '{GameObject.Name}' frame={_bunnyhopAuditFrame}: speed dropped {drop:0.###} from {_lastBunnyhopAuditSpeed:0.###} at '{_lastBunnyhopAuditPoint}' ({_lastBunnyhopAuditSource}) " +
+					$"to {speed:0.###} at '{point}' ({source}). The velocity change happened between those two audit points; inspect the current point's method/line and preceding movement operation.{extra}" );
+			}
+		}
+
+		_hasBunnyhopAuditSpeed = true;
+		_lastBunnyhopAuditSpeed = speed;
+		_lastBunnyhopAuditPoint = point;
+		_lastBunnyhopAuditSource = source;
+	}
+
+	private bool ShouldLogBunnyhopDebug()
+	{
+		return LogBunnyhopDebug && CanProcessLocalInput();
+	}
+
+	private static float GetHorizontalSpeed( Vector3 velocity )
+	{
+		return velocity.WithZ( 0.0f ).Length;
 	}
 
 	public void UpdateDucking( bool wantsDuck )
@@ -1305,6 +1393,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			_stepPosition = trace.EndPosition + Vector3.Up * Skin;
 			Body.WorldPosition = _stepPosition;
 			Body.Velocity = Body.Velocity.WithZ( 0.0f ) * 0.9f;
+			AuditBunnyhopSpeed( "Step movement velocity scale", Body.Velocity, "TryStep applied 0.9 horizontal scale" );
 
 			if ( StepDebug )
 				DebugOverlay.Line( top, _stepPosition, duration: 10.0f, color: Color.Green );
