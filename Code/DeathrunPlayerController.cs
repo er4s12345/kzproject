@@ -42,7 +42,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Input" ), InputAction] public string DuckButton { get; set; } = "Duck";
 	[Property, Group( "Input" ), InputAction] public string AltMoveButton { get; set; } = "Run";
 	[Property, Group( "Input" ), InputAction] public string UseButton { get; set; } = "Use";
-	[Property, Group( "Input" )] public bool RunByDefault { get; set; } = false;
+	[Property, Group( "Input" )] public bool RunByDefault { get; set; } = true;
 	[Property, Group( "Input" )] public bool EnablePressing { get; set; } = true;
 	[Property, Group( "Input" )] public float ReachLength { get; set; } = 130.0f;
 	[Property, Group( "Input" )] public float LookSensitivity { get; set; } = 1.0f;
@@ -58,11 +58,12 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Body" )] public bool FreezeBodyWhenMovementDisabled { get; set; } = true;
 
 	[Property, Group( "Movement" )] public float GroundAngle { get; set; } = 45.0f;
+	[Property, Group( "Movement" )] public bool UseGoldSrcMovement { get; set; } = true;
 	[Property, Group( "Movement" )] public float StepUpHeight { get; set; } = 18.0f;
 	[Property, Group( "Movement" )] public float StepDownHeight { get; set; } = 18.0f;
 	[Property, Group( "Movement" )] public float GroundFriction { get; set; } = 4.0f;
 	[Property, Group( "Movement" )] public float StopSpeed { get; set; } = 100.0f;
-	[Property, Group( "Movement" )] public float IdleVelocityEpsilon { get; set; } = 1.0f;
+	[Property, Group( "Movement" )] public float IdleVelocityEpsilon { get; set; } = 0.1f;
 	[Property, Group( "Movement" ), Range( 0, 1 )] public float BrakePower { get; set; } = 1.0f;
 	[Property, Group( "Movement" ), Range( 0, 1 )] public float AirFriction { get; set; } = 0.1f;
 	// Legacy selector retained for saved inspector values; air movement now always uses acceleration-based integration.
@@ -71,8 +72,13 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Movement" )] public float MaxGroundSpeed { get; set; } = 0.0f;
 	[Property, Group( "Movement" )] public float AirAcceleration { get; set; } = 10.0f;
 	[Property, Group( "Movement" )] public float AirControl { get; set; } = 0.0f;
+	[Property, Group( "Movement" )] public float AirWishSpeedCap { get; set; } = 30.0f;
+	[Property, Group( "Movement" )] public bool UseGoldSrcAirAccelerate { get; set; } = true;
 	[Property, Group( "Movement" )] public float MaxAirWishSpeed { get; set; } = 30.0f;
 	[Property, Group( "Movement" )] public float MaxAirVelocity { get; set; } = 0.0f;
+	[Property, Group( "Movement" )] public bool EnableGoldSrcMegaBunnyCap { get; set; } = false;
+	[Property, Group( "Movement" )] public float MegaBunnyMaxSpeedFactor { get; set; } = 1.7f;
+	[Property, Group( "Movement" )] public float MegaBunnyCropFraction { get; set; } = 0.65f;
 	[Property, Group( "Movement" )] public float StrafeMultiplier { get; set; } = 1.0f;
 	[Property, Group( "Movement" )] public bool PreserveAirMomentum { get; set; } = true;
 	[Property, Group( "Movement" )] public bool EnableBunnyhop { get; set; } = true;
@@ -277,6 +283,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 		AddMovementVelocity();
 		TryStep( StepUpHeight );
+		AuditBunnyhopSpeed( "After collision/step", Body.Velocity );
 	}
 
 	void IScenePhysicsEvents.PostPhysicsStep()
@@ -495,12 +502,29 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( !Body.IsValid() )
 			return;
 
-		PreventGrounding( 0.2f );
+		if ( UseGoldSrcMovement )
+		{
+			_timeUntilAllowedGround = 0.0f;
+			ClearGround();
+		}
+		else
+		{
+			PreventGrounding( 0.2f );
+		}
 
 		var currentVelocity = Body.Velocity;
 
-		if ( InheritGroundVelocityOnJump && !_groundTransformVelocity.IsNearlyZero( 0.01f ) )
+		if ( !UseGoldSrcMovement && InheritGroundVelocityOnJump && !_groundTransformVelocity.IsNearlyZero( 0.01f ) )
 			currentVelocity += _groundTransformVelocity;
+
+		if ( UseGoldSrcMovement )
+		{
+			currentVelocity = ApplyGoldSrcMegaBunnyCap( currentVelocity );
+			Body.Velocity = currentVelocity.WithZ( velocity.z );
+			Body.Sleeping = false;
+			LogState( "jump applied" );
+			return;
+		}
 
 		var direction = velocity.Normal;
 		var oppositeSpeed = Vector3.Dot( currentVelocity, direction );
@@ -609,7 +633,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		Body.OverrideMassCenter = true;
 		Body.MassCenterOverride = new Vector3( 0.0f, 0.0f, GetMassCenterHeight() );
 		Body.Gravity = WantsGravity();
-		Body.LinearDamping = WantsBodyBrakes() ? 10.0f * BrakePower : AirFriction;
+		Body.LinearDamping = UseGoldSrcMovement ? 0.0f : WantsBodyBrakes() ? 10.0f * BrakePower : AirFriction;
 		Body.AngularDamping = 1.0f;
 
 		var locking = Body.Locking;
@@ -627,7 +651,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		var radius = (BodyRadius * MathF.Sqrt( 2.0f )) / 2.0f;
 		var feetFriction = 0.0f;
 
-		if ( IsOnGround && WantsFeetBrakes() )
+		if ( !UseGoldSrcMovement && IsOnGround && WantsFeetBrakes() )
 			feetFriction = 1.0f + 100.0f * BrakePower * GetEffectiveGroundFriction();
 
 		if ( BodyCollider.IsValid() )
@@ -691,6 +715,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	private float GetEffectiveGroundFriction()
 	{
+		if ( UseGoldSrcMovement )
+			return MathF.Max( GroundFriction, 0.0f );
+
 		return MathF.Max( CurrentGroundFriction, 0.0f );
 	}
 
@@ -936,6 +963,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	private float GetAirWishSpeedCap( float wishSpeed )
 	{
+		if ( UseGoldSrcAirAccelerate )
+			return AirWishSpeedCap > 0.0f ? MathF.Min( wishSpeed, AirWishSpeedCap ) : wishSpeed;
+
 		if ( MaxAirWishSpeed > 0.0f )
 			return MathF.Min( wishSpeed, MaxAirWishSpeed );
 
@@ -944,6 +974,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	private float GetSurfaceFrictionScale()
 	{
+		if ( UseGoldSrcMovement )
+			return 1.0f;
+
 		if ( GroundFriction <= 0.0f )
 			return 1.0f;
 
@@ -953,6 +986,24 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private bool ShouldSkipGroundFrictionOnBunnyhop()
 	{
 		return EnableBunnyhop && SkipGroundFrictionOnBunnyhop;
+	}
+
+	private Vector3 ApplyGoldSrcMegaBunnyCap( Vector3 velocity )
+	{
+		if ( !EnableGoldSrcMegaBunnyCap || RunSpeed <= 0.0f )
+			return velocity;
+
+		var horizontal = velocity.WithZ( 0.0f );
+		var speed = horizontal.Length;
+		var maxScaledSpeed = MathF.Max( MegaBunnyMaxSpeedFactor, 0.0f ) * RunSpeed;
+
+		if ( maxScaledSpeed <= 0.0f || speed <= maxScaledSpeed )
+			return velocity;
+
+		var fraction = (maxScaledSpeed / speed) * MathF.Max( MegaBunnyCropFraction, 0.0f );
+		var cappedHorizontal = horizontal * fraction;
+		AuditBunnyhopSpeed( "GoldSrc mega bunny cap", cappedHorizontal.WithZ( velocity.z ), $"maxScaledSpeed={maxScaledSpeed:0.###}, fraction={fraction:0.###}" );
+		return cappedHorizontal.WithZ( velocity.z );
 	}
 
 	private Vector3 ApplyAirControl( Vector3 velocity, Vector3 wishDirection, float deltaTime, out float controlAmount )
@@ -1250,6 +1301,12 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	{
 		var wasGrounded = IsOnGround;
 		var groundZ = GroundVelocity.z;
+
+		if ( UseGoldSrcMovement && Body.IsValid() && Body.Velocity.z > 180.0f )
+		{
+			ClearGround();
+			return;
+		}
 
 		if ( groundZ > 250.0f )
 		{
