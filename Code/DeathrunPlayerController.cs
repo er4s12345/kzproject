@@ -59,6 +59,11 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 	[Property, Group( "Movement" )] public float GroundAngle { get; set; } = 45.0f;
 	[Property, Group( "Movement" )] public bool UseGoldSrcMovement { get; set; } = true;
+	[Property, Group( "Movement" )] public float GroundTraceUpDistance { get; set; } = 4.0f;
+	[Property, Group( "Movement" )] public float GroundTraceDistance { get; set; } = 8.0f;
+	[Property, Group( "Movement" )] public float GroundProbeRadius { get; set; } = 6.0f;
+	[Property, Group( "Movement" ), Range( 0, 0.95f )] public float GroundNormalSmoothing { get; set; } = 0.15f;
+	[Property, Group( "Movement" )] public bool AlignGroundVelocityToSlope { get; set; } = true;
 	[Property, Group( "Movement" )] public float StepUpHeight { get; set; } = 18.0f;
 	[Property, Group( "Movement" )] public float StepDownHeight { get; set; } = 18.0f;
 	[Property, Group( "Movement" )] public float GroundFriction { get; set; } = 4.0f;
@@ -104,6 +109,8 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	[Property, Group( "Debug" )] public bool LogMovementDebug { get; set; } = false;
 	[Property, Group( "Debug" )] public bool LogAirControlDebug { get; set; } = false;
 	[Property, Group( "Debug" )] public bool LogBunnyhopDebug { get; set; } = false;
+	[Property, Group( "Debug" )] public bool LogGroundDebug { get; set; } = false;
+	[Property, Group( "Debug" )] public bool LogSlopeDebug { get; set; } = false;
 	[Property, Group( "Debug" )] public float BunnyhopDebugSpeedDropThreshold { get; set; } = 20.0f;
 	[Property, Group( "Debug" )] public bool StepDebug { get; set; } = false;
 
@@ -116,6 +123,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	public Vector3 BaseVelocity => _baseVelocity;
 	public bool IsOnGround => _isOnGround;
 	public bool IsAirborne => !IsOnGround;
+	public bool IsWalkableGround { get; private set; }
+	public Vector3 GroundNormal { get; private set; } = Vector3.Up;
+	public float GroundSlopeAngle { get; private set; }
 	public GameObject GroundObject { get; private set; }
 	public Component GroundComponent { get; private set; }
 	public Surface GroundSurface { get; private set; }
@@ -154,6 +164,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private Vector3 _baseVelocity;
 	private Vector3 _groundTransformVelocity;
 	private Vector3 _bodyDuckOffset;
+	private string _lastGroundRejectReason;
 	private float _cameraDistance = 100.0f;
 	private float _smoothedEyeZ;
 	private Transform _localGroundTransform;
@@ -677,6 +688,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		if ( !IsOnGround )
 			return true;
 
+		if ( UseGoldSrcMovement && IsWalkableGround )
+			return false;
+
 		if ( Velocity.Length > 1.0f )
 			return true;
 
@@ -896,8 +910,9 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			AuditBunnyhopSpeed( "4 After friction", horizontal, $"frictionDrop={frictionDrop:0.###}, skipped={skippedFriction}" );
 			horizontal = Accelerate( horizontal, wishDirection, wishSpeed, wishSpeed, GroundAcceleration, Time.Delta, GetSurfaceFrictionScale(), out currentSpeed, out addSpeed, out accelSpeed );
 			AuditBunnyhopSpeed( "7 After ground/air acceleration", horizontal, $"mode=ground, currentAlongWish={currentSpeed:0.###}, addSpeed={addSpeed:0.###}, accelSpeed={accelSpeed:0.###}" );
-			relativeVelocity = horizontal.WithZ( originalZ - supportVelocity.z );
+			relativeVelocity = GetGroundMoveVelocity( horizontal, originalZ - supportVelocity.z );
 			AuditBunnyhopSpeed( "8 After any speed clamp", horizontal, "mode=ground, clamp=none" );
+			LogSlopeMovement( "ground move", horizontalBefore, horizontal, relativeVelocity, wishDirection, wishSpeed );
 			LogMovementStep( "ground", horizontalBefore, horizontal, wishDirection, wishSpeed, wishSpeedCap, currentSpeed, addSpeed, accelSpeed, frictionDrop, airControlAmount, skippedFriction, baseVelocity );
 		}
 		else
@@ -932,6 +947,31 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			wishSpeed = MathF.Min( wishSpeed, MaxGroundSpeed );
 
 		return wishSpeed;
+	}
+
+	private Vector3 GetGroundMoveVelocity( Vector3 horizontalVelocity, float fallbackVerticalVelocity )
+	{
+		if ( !UseGoldSrcMovement )
+			return horizontalVelocity.WithZ( fallbackVerticalVelocity );
+
+		if ( !AlignGroundVelocityToSlope || !IsWalkableGround )
+			return horizontalVelocity.WithZ( 0.0f );
+
+		return AlignHorizontalVelocityToGroundPlane( horizontalVelocity, GroundNormal );
+	}
+
+	private static Vector3 AlignHorizontalVelocityToGroundPlane( Vector3 horizontalVelocity, Vector3 groundNormal )
+	{
+		var horizontal = horizontalVelocity.WithZ( 0.0f );
+
+		if ( horizontal.IsNearlyZero( 0.001f ) )
+			return Vector3.Zero;
+
+		if ( groundNormal.z <= 0.001f )
+			return horizontal;
+
+		var vertical = -Vector3.Dot( horizontal, groundNormal.WithZ( 0.0f ) ) / groundNormal.z;
+		return horizontal.WithZ( vertical );
 	}
 
 	private Vector3 ApplyGroundFriction( Vector3 velocity, float deltaTime, bool skipFriction, out float frictionDrop )
@@ -1104,10 +1144,16 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private void TryJump()
 	{
 		if ( JumpSpeed <= 0.0f )
+		{
+			LogJumpDecision( "jump failed: JumpSpeed <= 0", false, false, false );
 			return;
+		}
 
 		if ( string.IsNullOrWhiteSpace( JumpButton ) )
+		{
+			LogJumpDecision( "jump failed: JumpButton empty", false, false, false );
 			return;
+		}
 
 		var jumpPressed = Input.Pressed( JumpButton );
 		var jumpHeld = Input.Down( JumpButton );
@@ -1117,13 +1163,22 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			return;
 
 		if ( _timeSinceJump < JumpCooldown )
+		{
+			LogJumpDecision( $"jump failed: cooldown {(float)_timeSinceJump:0.###} < {JumpCooldown:0.###}", jumpPressed, jumpHeld, jumpQueued );
 			return;
+		}
 
 		if ( !IsOnGround && _jumpedSinceGrounded )
+		{
+			LogJumpDecision( "jump failed: airborne and already jumped since grounded", jumpPressed, jumpHeld, jumpQueued );
 			return;
+		}
 
 		if ( TimeSinceGrounded > CoyoteTime )
+		{
+			LogJumpDecision( $"jump failed: TimeSinceGrounded {(float)TimeSinceGrounded:0.###} > CoyoteTime {CoyoteTime:0.###}", jumpPressed, jumpHeld, jumpQueued );
 			return;
+		}
 
 		AuditBunnyhopSpeed( "5 Before jump", Body.IsValid() ? Body.Velocity : Vector3.Zero, $"jumpPressed={jumpPressed}, jumpHeld={jumpHeld}, jumpQueued={jumpQueued}" );
 		_skipGroundFrictionThisTick = ShouldSkipGroundFrictionOnBunnyhop() && IsOnGround;
@@ -1136,6 +1191,21 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		_jumpedSinceGrounded = true;
 		Renderer?.Set( "b_jump", true );
 		IEvents.PostToGameObject( GameObject, x => x.OnJumped() );
+	}
+
+	private void LogJumpDecision( string reason, bool jumpPressed, bool jumpHeld, bool jumpQueued )
+	{
+		if ( !LogGroundDebug && !LogBunnyhopDebug )
+			return;
+
+		if ( !CanProcessLocalInput() )
+			return;
+
+		Log.Info(
+			$"DeathrunJump '{GameObject.Name}' {reason}, grounded={IsOnGround}, walkable={IsWalkableGround}, " +
+			$"groundNormal={GroundNormal}, slopeAngle={GroundSlopeAngle:0.###}, lastGroundReject='{_lastGroundRejectReason}', " +
+			$"jumpPressed={jumpPressed}, jumpHeld={jumpHeld}, jumpQueued={jumpQueued}, internalQueued={_jumpQueued}, " +
+			$"jumpConsumed={_jumpConsumedThisTick}, timeSinceGrounded={(float)TimeSinceGrounded:0.###}, velocity={(Body.IsValid() ? Body.Velocity : Vector3.Zero)}" );
 	}
 
 	private void LogMovementStep(
@@ -1167,6 +1237,49 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			$"wishDir={wishDirection}, wishSpeed={wishSpeed:0.###}, wishSpeedCap={wishSpeedCap:0.###}, currentAlongWish={currentSpeed:0.###}, addSpeed={addSpeed:0.###}, accelSpeed={accelSpeed:0.###}, " +
 			$"frictionDrop={frictionDrop:0.###}, airControl={airControlAmount:0.###}, jumpPressed={hasJumpButton && Input.Pressed( JumpButton )}, jumpHeld={hasJumpButton && Input.Down( JumpButton )}, " +
 			$"jumpQueued={_jumpQueued}, skipFriction={skippedFriction}, baseVelocity={baseVelocity}" );
+	}
+
+	private void LogGroundState( string phase, SceneTraceResult trace, string reason )
+	{
+		if ( !LogGroundDebug && !LogSlopeDebug )
+			return;
+
+		if ( !CanProcessLocalInput() )
+			return;
+
+		var normal = trace.Hit ? GetSafeGroundNormal( trace.Normal ) : GroundNormal;
+		var dotUp = Vector3.Dot( normal, Vector3.Up );
+		var slopeAngle = GetSlopeAngle( normal );
+		var hitObject = trace.GameObject.IsValid() ? trace.GameObject.Name : trace.Collider.IsValid() ? trace.Collider.GameObject.Name : "none";
+		var input = Input.AnalogMove.ClampLength( 1.0f );
+		var idle = input.IsNearlyZero( 0.01f ) && Body.IsValid() && GetHorizontalSpeed( Body.Velocity - GroundVelocity ) <= IdleVelocityEpsilon;
+
+		Log.Info(
+			$"DeathrunGround '{GameObject.Name}' phase={phase}, pos={WorldPosition}, vel={(Body.IsValid() ? Body.Velocity : Vector3.Zero)}, " +
+			$"horizontalSpeed={(Body.IsValid() ? GetHorizontalSpeed( Body.Velocity - GroundVelocity ) : 0.0f):0.###}, hit={trace.Hit}, object='{hitObject}', " +
+			$"normal={normal}, dotUp={dotUp:0.###}, slopeAngle={slopeAngle:0.###}, maxSlope={GroundAngle:0.###}, walkable={IsStandableNormal( normal )}, " +
+			$"isOnGround={IsOnGround}, distance={trace.Distance:0.###}, verticalVelocity={(Body.IsValid() ? Body.Velocity.z : 0.0f):0.###}, " +
+			$"idle={idle}, input={input}, jumpPressed={!string.IsNullOrWhiteSpace( JumpButton ) && Input.Pressed( JumpButton )}, " +
+			$"jumpHeld={!string.IsNullOrWhiteSpace( JumpButton ) && Input.Down( JumpButton )}, jumpQueued={_jumpQueued}, jumpConsumed={_jumpConsumedThisTick}, reason={reason}" );
+	}
+
+	private void LogSlopeMovement( string phase, Vector3 beforeHorizontal, Vector3 afterHorizontal, Vector3 finalRelativeVelocity, Vector3 wishDirection, float wishSpeed )
+	{
+		if ( !LogSlopeDebug )
+			return;
+
+		if ( !CanProcessLocalInput() )
+			return;
+
+		var rawWish = WishVelocity.WithZ( 0.0f );
+		var alignedWish = AlignHorizontalVelocityToGroundPlane( rawWish, GroundNormal );
+		var dot = Vector3.Dot( GetSafeGroundNormal( GroundNormal ), Vector3.Up );
+
+		Log.Info(
+			$"DeathrunSlope '{GameObject.Name}' phase={phase}, grounded={IsOnGround}, walkable={IsWalkableGround}, " +
+			$"groundNormal={GroundNormal}, dotUp={dot:0.###}, slopeAngle={GroundSlopeAngle:0.###}, " +
+			$"rawWish={rawWish}, alignedWish={alignedWish}, wishDirection={wishDirection}, wishSpeed={wishSpeed:0.###}, " +
+			$"beforeHorizontal={beforeHorizontal}, afterHorizontal={afterHorizontal}, finalRelativeVelocity={finalRelativeVelocity}, slideApplied=false" );
 	}
 
 	private void BeginBunnyhopSpeedAudit()
@@ -1294,7 +1407,7 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	public void PreventGrounding( float seconds )
 	{
 		_timeUntilAllowedGround = MathF.Max( _timeUntilAllowedGround, seconds );
-		ClearGround();
+		ClearGround( $"prevent grounding for {seconds:0.###}s" );
 	}
 
 	private void CategorizeGround()
@@ -1302,9 +1415,10 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		var wasGrounded = IsOnGround;
 		var groundZ = GroundVelocity.z;
 
-		if ( UseGoldSrcMovement && Body.IsValid() && Body.Velocity.z > 180.0f )
+		if ( UseGoldSrcMovement && Body.IsValid() && Body.Velocity.z > 180.0f && !IsVelocityAlignedToWalkableGround( Body.Velocity - GroundVelocity ) )
 		{
-			ClearGround();
+			ClearGround( $"upward velocity {Body.Velocity.z:0.###} rejected" );
+			LogGroundState( "categorize rejected upward velocity", default, _lastGroundRejectReason );
 			return;
 		}
 
@@ -1316,32 +1430,20 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 		if ( _timeUntilAllowedGround > 0.0f || groundZ > 300.0f )
 		{
-			ClearGround();
+			ClearGround( $"grounding prevented or ground velocity too high: prevent={_timeUntilAllowedGround}, groundZ={groundZ:0.###}" );
+			LogGroundState( "categorize prevented", default, _lastGroundRejectReason );
 			return;
 		}
 
-		var from = WorldPosition + Vector3.Up * 4.0f;
-		var to = WorldPosition + Vector3.Down * 2.0f;
-		var radiusScale = 1.0f;
-		var trace = TraceBody( from, to, radiusScale, 0.5f );
+		var from = WorldPosition + Vector3.Up * MathF.Max( GroundTraceUpDistance, 0.0f );
+		var to = WorldPosition + Vector3.Down * MathF.Max( GroundTraceDistance, 0.0f );
 
-		while ( trace.StartedSolid || (trace.Hit && !IsStandableSurface( trace )) )
-		{
-			radiusScale -= 0.1f;
-
-			if ( radiusScale < 0.7f )
-			{
-				ClearGround();
-				return;
-			}
-
-			trace = TraceBody( from, to, radiusScale, 0.5f );
-		}
-
-		if ( !trace.StartedSolid && trace.Hit && IsStandableSurface( trace ) )
+		if ( TryTraceGround( from, to, 0.5f, out var trace, out var rejectReason ) )
 			SetGround( trace );
 		else
-			ClearGround();
+			ClearGround( rejectReason );
+
+		LogGroundState( "categorize", trace, IsOnGround ? "accepted" : _lastGroundRejectReason );
 
 		if ( wasGrounded != IsOnGround )
 			UpdateBodySetup();
@@ -1353,21 +1455,11 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 			return;
 
 		var currentPosition = WorldPosition;
-		var radiusScale = 1.0f;
-		var trace = TraceBody( currentPosition + Vector3.Up, currentPosition + Vector3.Down * stepSize, radiusScale, 0.5f );
-
-		while ( trace.StartedSolid )
+		if ( !TryTraceGround( currentPosition + Vector3.Up, currentPosition + Vector3.Down * stepSize, 0.5f, out var trace, out var rejectReason ) )
 		{
-			radiusScale -= 0.1f;
-
-			if ( radiusScale < 0.7f )
-				return;
-
-			trace = TraceBody( currentPosition + Vector3.Up, currentPosition + Vector3.Down * stepSize, radiusScale, 0.5f );
-		}
-
-		if ( !trace.Hit || !IsStandableSurface( trace ) )
+			LogGroundState( "reground rejected", trace, rejectReason );
 			return;
+		}
 
 		var targetPosition = trace.EndPosition + Vector3.Up * 0.01f;
 		var delta = currentPosition - targetPosition;
@@ -1415,6 +1507,12 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 
 			if ( !trace.Hit )
 				return;
+
+			if ( IsStandableSurface( trace ) )
+			{
+				LogSlopeMovement( "step skipped walkable slope", velocity, velocity, Body.Velocity, velocity.IsNearlyZero( 0.01f ) ? Vector3.Zero : velocity.Normal, velocity.Length );
+				return;
+			}
 
 			if ( StepDebug )
 				DebugOverlay.Line( start, end, duration: 10.0f, color: Color.Green );
@@ -1483,12 +1581,19 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 	private void SetGround( SceneTraceResult trace )
 	{
 		var body = trace.Body;
+		var wasGrounded = IsOnGround;
+		var previousNormal = GroundNormal;
+		var rawNormal = GetSafeGroundNormal( trace.Normal );
 		GroundObject = trace.GameObject;
 		GroundComponent = trace.Component ?? trace.Collider ?? body?.Component;
 		GroundSurface = trace.Surface;
 		GroundIsDynamic = false;
 		CurrentGroundFriction = GroundFriction;
 		_isOnGround = true;
+		IsWalkableGround = true;
+		GroundNormal = SmoothGroundNormal( rawNormal, previousNormal, wasGrounded );
+		GroundSlopeAngle = GetSlopeAngle( GroundNormal );
+		_lastGroundRejectReason = null;
 		_jumpedSinceGrounded = false;
 		TimeSinceGrounded = 0.0f;
 
@@ -1535,12 +1640,15 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 				|| groundObject.Components.Get<DeathrunNetworkedTransformDriver>().IsValid());
 	}
 
-	private void ClearGround()
+	private void ClearGround( string reason = null )
 	{
 		if ( IsOnGround )
 			TimeSinceUngrounded = 0.0f;
 
 		_isOnGround = false;
+		IsWalkableGround = false;
+		GroundNormal = Vector3.Up;
+		GroundSlopeAngle = 0.0f;
 		GroundObject = null;
 		GroundComponent = null;
 		GroundSurface = null;
@@ -1550,11 +1658,127 @@ public sealed class DeathrunPlayerController : Component, Component.INetworkSpaw
 		_groundHash = default;
 		_localGroundTransform = default;
 		_groundTransformVelocity = Vector3.Zero;
+
+		if ( !string.IsNullOrWhiteSpace( reason ) )
+			_lastGroundRejectReason = reason;
 	}
 
 	private bool IsStandableSurface( SceneTraceResult trace )
 	{
-		return Vector3.GetAngle( Vector3.Up, trace.Normal ) <= GroundAngle;
+		return IsStandableNormal( trace.Normal );
+	}
+
+	private bool IsStandableNormal( Vector3 normal )
+	{
+		normal = GetSafeGroundNormal( normal );
+		var maxAngle = GroundAngle.Clamp( 0.0f, 89.9f );
+		var minDot = MathF.Cos( maxAngle * (MathF.PI / 180.0f) );
+		return Vector3.Dot( normal, Vector3.Up ) >= minDot;
+	}
+
+	private static Vector3 GetSafeGroundNormal( Vector3 normal )
+	{
+		return normal.IsNearlyZero( 0.001f ) ? Vector3.Up : normal.Normal;
+	}
+
+	private Vector3 SmoothGroundNormal( Vector3 rawNormal, Vector3 previousNormal, bool wasGrounded )
+	{
+		if ( !wasGrounded || GroundNormalSmoothing <= 0.0f )
+			return rawNormal;
+
+		var smoothing = GroundNormalSmoothing.Clamp( 0.0f, 0.95f );
+		var smoothed = Vector3.Lerp( rawNormal, GetSafeGroundNormal( previousNormal ), smoothing );
+		return GetSafeGroundNormal( smoothed );
+	}
+
+	private static float GetSlopeAngle( Vector3 normal )
+	{
+		return Vector3.GetAngle( Vector3.Up, GetSafeGroundNormal( normal ) );
+	}
+
+	private bool IsVelocityAlignedToWalkableGround( Vector3 velocity )
+	{
+		if ( !IsWalkableGround || !IsStandableNormal( GroundNormal ) )
+			return false;
+
+		if ( velocity.IsNearlyZero( 0.001f ) )
+			return true;
+
+		var tangentError = MathF.Abs( Vector3.Dot( velocity, GroundNormal ) );
+		var allowedError = MathF.Max( 32.0f, velocity.Length * 0.15f );
+		return tangentError <= allowedError;
+	}
+
+	private bool TryTraceGround( Vector3 from, Vector3 to, float heightScale, out SceneTraceResult trace, out string rejectReason )
+	{
+		var radiusScale = 1.0f;
+		trace = default;
+		rejectReason = "no ground hit";
+
+		while ( radiusScale >= 0.7f )
+		{
+			trace = TraceBody( from, to, radiusScale, heightScale );
+
+			if ( trace.StartedSolid )
+			{
+				rejectReason = $"body trace started solid at radiusScale={radiusScale:0.##}";
+				radiusScale -= 0.1f;
+				continue;
+			}
+
+			if ( !trace.Hit )
+			{
+				rejectReason = $"body trace missed at radiusScale={radiusScale:0.##}";
+				break;
+			}
+
+			if ( IsStandableSurface( trace ) )
+				return true;
+
+			rejectReason = BuildGroundRejectReason( trace, $"body trace radiusScale={radiusScale:0.##}" );
+			radiusScale -= 0.1f;
+		}
+
+		return TryTraceGroundProbe( from, to, out trace, ref rejectReason );
+	}
+
+	private bool TryTraceGroundProbe( Vector3 from, Vector3 to, out SceneTraceResult trace, ref string rejectReason )
+	{
+		trace = default;
+
+		if ( GroundProbeRadius <= 0.0f )
+			return false;
+
+		var hits = Scene.Trace
+			.Ray( from, to )
+			.IgnoreGameObjectHierarchy( GameObject )
+			.WithCollisionRules( Tags )
+			.Radius( MathF.Min( GroundProbeRadius, BodyRadius ) )
+			.RunAll();
+
+		foreach ( var hit in hits )
+		{
+			if ( hit.StartedSolid || !hit.Hit )
+				continue;
+
+			if ( IsStandableSurface( hit ) )
+			{
+				trace = hit;
+				return true;
+			}
+
+			rejectReason = BuildGroundRejectReason( hit, "ground probe" );
+		}
+
+		return false;
+	}
+
+	private string BuildGroundRejectReason( SceneTraceResult trace, string source )
+	{
+		var normal = GetSafeGroundNormal( trace.Normal );
+		var dot = Vector3.Dot( normal, Vector3.Up );
+		var angle = GetSlopeAngle( normal );
+		return $"{source} rejected: normal={normal}, dotUp={dot:0.###}, slopeAngle={angle:0.###}, maxSlope={GroundAngle:0.###}, distance={trace.Distance:0.###}";
 	}
 
 	public BBox BodyBox( float scale = 1.0f, float heightScale = 1.0f )
